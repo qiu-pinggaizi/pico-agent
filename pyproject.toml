@@ -46,6 +46,10 @@ all = [
     "numpy>=1.24",
     "onnx>=1.14",
 ]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
 
 [project.scripts]
 pico-agent = "pico.cli:main"
