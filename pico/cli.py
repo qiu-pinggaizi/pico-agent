@@ -432,8 +432,18 @@ def main(argv: list[str] | None = None) -> None:
     while i < len(argv):
         a = argv[i]
         if a in ("--help", "-h"):
-            _print_help()
-            sys.exit(0)
+            # If a command follows, let the command parser handle --help
+            # (e.g. `pico-agent train --help` → show train help, not global help)
+            rest_after = argv[i + 1:]
+            if positional and positional[0] in KNOWN_COMMANDS:
+                positional.append(a)
+                i += 1
+            elif rest_after and rest_after[0] in KNOWN_COMMANDS:
+                positional.append(a)
+                i += 1
+            else:
+                _print_help()
+                sys.exit(0)
         elif a in ("--session", "-s") and i + 1 < len(argv):
             session_id_arg = argv[i + 1]; i += 2
         elif a.startswith("--session="):
