@@ -5,21 +5,25 @@ All handlers return JSON strings.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
 from pico.tools.registry import ToolRegistry
+from pico.tools.utils import _error, _success
 
 logger = logging.getLogger(__name__)
 
+# Module-level Memory instance — reused across all tool calls.
+_memory_instance: Any = None
 
-def _success(data: Any) -> str:
-    return json.dumps({"success": True, **(data if isinstance(data, dict) else {"result": data})}, ensure_ascii=False)
 
-
-def _error(msg: str) -> str:
-    return json.dumps({"success": False, "error": msg}, ensure_ascii=False)
+def _get_memory() -> Any:
+    """Return the shared Memory instance, creating it on first call."""
+    global _memory_instance
+    if _memory_instance is None:
+        from pico.memory import Memory
+        _memory_instance = Memory()
+    return _memory_instance
 
 
 # ---------------------------------------------------------------------------
@@ -29,9 +33,7 @@ def _error(msg: str) -> str:
 def memory_read(limit: int = 0, **kwargs: Any) -> str:
     """Read persistent memory content."""
     try:
-        from pico.memory import Memory
-
-        memory = Memory()
+        memory = _get_memory()
         content = memory.load()
 
         if not content.strip():
@@ -52,9 +54,7 @@ def memory_write(content: str = "", **kwargs: Any) -> str:
         if not content or not content.strip():
             return _error("content is required and cannot be empty.")
 
-        from pico.memory import Memory
-
-        memory = Memory()
+        memory = _get_memory()
         memory.add(content.strip())
         return _success({"message": f"Memory entry added: {content.strip()}"})
     except Exception as e:
@@ -67,9 +67,7 @@ def memory_delete(keyword: str = "", **kwargs: Any) -> str:
         if not keyword or not keyword.strip():
             return _error("keyword is required.")
 
-        from pico.memory import Memory
-
-        memory = Memory()
+        memory = _get_memory()
         removed = memory.remove(keyword.strip())
         if removed:
             return _success({"message": f"Removed entries matching '{keyword}'"})
@@ -85,9 +83,7 @@ def memory_search(query: str = "", **kwargs: Any) -> str:
         if not query or not query.strip():
             return _error("query is required.")
 
-        from pico.memory import Memory
-
-        memory = Memory()
+        memory = _get_memory()
         content = memory.load()
 
         if not content.strip():

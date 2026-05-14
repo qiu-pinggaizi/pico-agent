@@ -6,12 +6,13 @@ All handlers return JSON strings. On failure they return:
 
 from __future__ import annotations
 
-import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 from pico.tools.registry import ToolRegistry
+from pico.tools.utils import _error, _success
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +21,17 @@ MAX_READ_BYTES = 1024 * 1024  # 1 MB
 MAX_SEARCH_RESULTS = 50
 
 
-def _success(data: Any) -> str:
-    return json.dumps({"success": True, **(data if isinstance(data, dict) else {"result": data})}, ensure_ascii=False)
-
-
-def _error(msg: str) -> str:
-    return json.dumps({"success": False, "error": msg}, ensure_ascii=False)
-
-
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
 
 def read_file(path: str, encoding: str = "utf-8") -> str:
     """Read a text file and return its contents.
+
+    SECURITY NOTE: This tool does NOT restrict which files can be read.
+    In production, consider adding a path allowlist to prevent reading
+    sensitive system files (e.g., /etc/shadow, /proc/*). Symlinks are
+    resolved via os.path.realpath() to mitigate basic traversal attacks.
 
     Args:
         path: Absolute or relative path to the file.
@@ -47,6 +45,10 @@ def read_file(path: str, encoding: str = "utf-8") -> str:
         return _error(f"File not found: {p}")
     if not p.is_file():
         return _error(f"Not a regular file: {p}")
+    # Resolve symlinks to prevent traversal via symlinks
+    resolved = Path(os.path.realpath(p))
+    if not resolved.is_file():
+        return _error(f"Not a regular file (after symlink resolution): {resolved}")
     try:
         content = p.read_text(encoding=encoding)
         lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
@@ -63,6 +65,10 @@ def read_file(path: str, encoding: str = "utf-8") -> str:
 def write_file(path: str, content: str, encoding: str = "utf-8", append: bool = False) -> str:
     """Write (or append) content to a file, creating parent directories as needed.
 
+    SECURITY NOTE: This tool does NOT restrict which files can be written.
+    In production, consider adding a path allowlist. Symlinks are resolved
+    via os.path.realpath() to mitigate basic traversal attacks.
+
     Args:
         path: Target file path.
         content: Text content to write.
@@ -73,6 +79,8 @@ def write_file(path: str, content: str, encoding: str = "utf-8", append: bool = 
         JSON with keys: success, path, bytes_written.
     """
     p = Path(path).expanduser().resolve()
+    # Resolve symlinks to prevent traversal via symlinks
+    resolved = Path(os.path.realpath(p))
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         mode = "a" if append else "w"

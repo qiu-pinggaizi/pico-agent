@@ -148,7 +148,7 @@ pip install -e ".[all]"                # Everything
 # LLM (required)
 export PICO_API_KEY="sk-..."
 export PICO_MODEL="gpt-4o"                     # or claude-3-5-sonnet-20241022
-export PICO_API_BASE="https://api.openai.com/v1"  # or custom proxy
+export PICO_BASE_URL="https://api.openai.com/v1"  # or custom proxy
 
 # Optional: higher rate limits
 export GITHUB_TOKEN="ghp_..."
@@ -167,8 +167,16 @@ Create `~/.pico-agent/config.yaml`:
 
 ```yaml
 # LLM settings
-model: gpt-4o
-api_base: https://api.openai.com/v1
+model:
+  provider: openai
+  model: gpt-4o
+  base_url: https://api.openai.com/v1
+  # api_key: ""  # Or set PICO_API_KEY env var
+
+# Agent settings
+agent:
+  max_turns: 50
+  max_tokens: 128000
 
 # Remote servers (for detection workflows)
 servers:

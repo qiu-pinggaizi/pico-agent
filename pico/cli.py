@@ -18,7 +18,10 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pico.agent import AIAgent
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +102,7 @@ def _rich_print_memory(memory_content: str) -> None:
 # Slash commands
 # ---------------------------------------------------------------------------
 
-def _handle_slash_command(cmd: str, agent: Any) -> str | None:
+def _handle_slash_command(cmd: str, agent: AIAgent) -> str | None:
     """Handle a slash command. Returns a display string, or None if not recognized."""
     parts = cmd.strip().split(maxsplit=1)
     command = parts[0].lower()
@@ -193,7 +196,7 @@ def _validate_file(path: str, label: str = "File") -> str | None:
 # Shortcut commands — directly invoke tools (bypass LLM when possible)
 # ---------------------------------------------------------------------------
 
-def _shortcut_train(agent: Any, args: argparse.Namespace) -> int:
+def _shortcut_train(agent: AIAgent, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent train <data_dir> [--model X] [--epochs N] [--dry-run]"""
     data_dir = args.data_dir
     err = _validate_dir(data_dir, "Dataset directory")
@@ -225,7 +228,7 @@ def _shortcut_train(agent: Any, args: argparse.Namespace) -> int:
         return 0
 
 
-def _shortcut_eval(agent: Any, args: argparse.Namespace) -> int:
+def _shortcut_eval(agent: AIAgent, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent eval <model_path> [--data data.yaml]"""
     err = _validate_file(args.model_path, "Model file")
     if err:
@@ -250,7 +253,7 @@ def _shortcut_eval(agent: Any, args: argparse.Namespace) -> int:
         return 0
 
 
-def _shortcut_search(agent: Any, args: argparse.Namespace) -> int:
+def _shortcut_search(agent: AIAgent, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent search <query> [--source github|huggingface|all]"""
     source = args.source or "all"
     if source == "all":
@@ -262,7 +265,7 @@ def _shortcut_search(agent: Any, args: argparse.Namespace) -> int:
     return _single_shot(agent, prompt)
 
 
-def _shortcut_download(agent: Any, args: argparse.Namespace) -> int:
+def _shortcut_download(agent: AIAgent, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent download <query_or_url> [--source huggingface|kaggle|url]"""
     source = args.source or "huggingface"
     if args.query_or_url.startswith("http"):
@@ -275,7 +278,7 @@ def _shortcut_download(agent: Any, args: argparse.Namespace) -> int:
     return _single_shot(agent, prompt)
 
 
-def _shortcut_clone(agent: Any, args: argparse.Namespace) -> int:
+def _shortcut_clone(agent: AIAgent, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent clone <url> [--install]"""
     # Direct tool call
     tool_args: dict[str, Any] = {"url": args.url}
@@ -302,7 +305,7 @@ def _shortcut_clone(agent: Any, args: argparse.Namespace) -> int:
         return 0
 
 
-def _shortcut_infer(agent: Any, args: argparse.Namespace) -> int:
+def _shortcut_infer(agent: AIAgent, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent infer <model_path> <image_path>"""
     err = _validate_file(args.model_path, "Model file")
     if err:
@@ -321,12 +324,16 @@ def _shortcut_infer(agent: Any, args: argparse.Namespace) -> int:
 # Single-shot mode
 # ---------------------------------------------------------------------------
 
-def _single_shot(agent: Any, message: str) -> int:
+def _single_shot(agent: AIAgent, message: str) -> int:
     """Run a single message through the LLM and print the response.
 
     Returns:
         Exit code (0 for success, 1 for error).
     """
+    message = message.strip()
+    if not message:
+        print("Error: empty message. Provide a question or command.", file=sys.stderr)
+        return 1
     try:
         response = agent.run(message)
         _rich_print(response)
@@ -334,7 +341,7 @@ def _single_shot(agent: Any, message: str) -> int:
     except KeyboardInterrupt:
         print("\nCancelled.")
         return 130
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
@@ -343,7 +350,7 @@ def _single_shot(agent: Any, message: str) -> int:
 # REPL mode
 # ---------------------------------------------------------------------------
 
-def _repl(agent: Any) -> int:
+def _repl(agent: AIAgent) -> int:
     """Interactive REPL with prompt_toolkit."""
     try:
         from prompt_toolkit import PromptSession
@@ -392,7 +399,7 @@ def _repl(agent: Any) -> int:
             _rich_print(response)
         except KeyboardInterrupt:
             print("\n[Interrupted]")
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError) as e:
             logger.exception("Agent error")
             print(f"Error: {e}", file=sys.stderr)
 
@@ -426,6 +433,7 @@ def main(argv: list[str] | None = None) -> None:
     session_id_arg = ""
     verbose = False
     config_path = None
+    explicit_config = False
     positional: list[str] = []
 
     i = 0
@@ -444,6 +452,10 @@ def main(argv: list[str] | None = None) -> None:
             else:
                 _print_help()
                 sys.exit(0)
+        elif a in ("--version", "-V"):
+            from pico import __version__
+            print(f"pico-agent {__version__}")
+            sys.exit(0)
         elif a in ("--session", "-s") and i + 1 < len(argv):
             session_id_arg = argv[i + 1]; i += 2
         elif a.startswith("--session="):
@@ -451,15 +463,22 @@ def main(argv: list[str] | None = None) -> None:
         elif a in ("--verbose", "-v"):
             verbose = True; i += 1
         elif a in ("--config", "-c") and i + 1 < len(argv):
-            config_path = argv[i + 1]; i += 2
+            config_path = argv[i + 1]; explicit_config = True; i += 2
         elif a.startswith("--config="):
-            config_path = a.split("=", 1)[1]; i += 1
+            config_path = a.split("=", 1)[1]; explicit_config = True; i += 1
         elif a == "--":
             positional.extend(argv[i + 1:]); break
         else:
             positional.append(a); i += 1
 
     _setup_logging(verbose)
+
+    # --- Validate explicit --config path (Bug #2) ---
+    if explicit_config and config_path is not None:
+        cfg_p = Path(config_path).expanduser().resolve()
+        if not cfg_p.exists():
+            print(f"Error: config file not found: {config_path}", file=sys.stderr)
+            sys.exit(1)
 
     # --- Route: command vs single-shot vs REPL ---
     command = None
@@ -478,7 +497,11 @@ def main(argv: list[str] | None = None) -> None:
     from pico.tools import discover_and_register
     from pico.tools.registry import ToolRegistry
 
-    config = load_config(config_path)
+    try:
+        config = load_config(config_path, strict=explicit_config)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Set up history file
     history_path = str(CONFIG_DIR / "history")
@@ -498,6 +521,19 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     exit_code = 0
+
+    # --- Piped stdin: read and process as single-shot (Bug #3) ---
+    if command is None and not positional and not sys.stdin.isatty():
+        piped_input = sys.stdin.read().strip()
+        if piped_input:
+            try:
+                response = agent.run(piped_input)
+                _rich_print(response)
+            except (OSError, ValueError, RuntimeError) as e:
+                print(f"Error: {e}", file=sys.stderr)
+                exit_code = 1
+        session_store.close()
+        sys.exit(exit_code or 0)
 
     try:
         if command == "train" and command_args:
@@ -525,32 +561,59 @@ def main(argv: list[str] | None = None) -> None:
 
 def _print_help() -> None:
     """Print help text (not auto-generated, to avoid argparse issues)."""
+    from pico import __version__ as _v
     print(
-        "usage: pico-agent [-h] [-s SESSION] [-v] [-c CONFIG] [command ... | message]\n\n"
-        "Pico Agent — AI agent with tool use, dataset/code download, and detection\n"
-        "training\n\n"
-        "options:\n"
-        "  -h, --help            show this help message and exit\n"
-        "  -s, --session SESSION Resume a specific session by ID\n"
-        "  -v, --verbose         Enable debug logging\n"
-        "  -c, --config CONFIG   Path to config YAML file\n\n"
-        "Shortcut commands:\n"
-        "  train    Auto-detect dataset and start training\n"
-        "  eval     Evaluate a trained model\n"
-        "  search   Search GitHub / HuggingFace\n"
-        "  download Search and download a dataset\n"
-        "  clone    Clone a Git repository\n"
-        "  infer    Run inference on an image\n\n"
-        "Examples:\n"
-        "  pico-agent                              # Interactive REPL\n"
-        '  pico-agent "what\'s 2+2?"                # Single-shot\n'
-        "  pico-agent train ./datasets/traffic     # Quick train\n"
+        "╔══════════════════════════════════════════════════════════════════╗\n"
+        f"║  Pico Agent v{_v} — AI-powered coding & detection assistant  ║\n"
+        "╚══════════════════════════════════════════════════════════════════╝\n"
+        "\n"
+        "USAGE\n"
+        "  pico-agent [flags] [command ... | message]\n"
+        "\n"
+        "FLAGS\n"
+        "  -h, --help              Show this help message and exit\n"
+        "  -V, --version           Show version and exit\n"
+        "  -s, --session SESSION   Resume a specific session by ID\n"
+        "  -v, --verbose           Enable debug logging (default: warnings only)\n"
+        "  -c, --config CONFIG     Path to a YAML config file (default: ~/.pico-agent/config.yaml)\n"
+        "\n"
+        "QUICK START\n"
+        "  pico-agent                              Start interactive REPL\n"
+        '  pico-agent "what is the weather?"       Single-shot question\n'
+        "  pico-agent train ./datasets/traffic     Auto-detect & train a model\n"
         "  pico-agent train ./data --model yolov8s --dry-run\n"
         "  pico-agent eval runs/train/weights/best.pt\n"
         '  pico-agent search "RT-DETR" --source github\n'
         '  pico-agent download "coco 2017" --source huggingface\n'
         "  pico-agent clone https://github.com/user/repo --install\n"
-        "  pico-agent infer best.pt image.jpg"
+        "  pico-agent infer best.pt image.jpg\n"
+        "\n"
+        "SHORTCUT COMMANDS\n"
+        "  train <dir>       Auto-detect dataset format and start YOLO training\n"
+        "                    Options: --model, --epochs, --batch, --dry-run\n"
+        "  eval <model>      Evaluate a trained model and show mAP / PR curves\n"
+        "                    Options: --data <data.yaml>\n"
+        "  search <query>    Search GitHub repos and HuggingFace datasets\n"
+        "                    Options: --source github|huggingface|kaggle|all\n"
+        "  download <query>  Search, download, and verify a dataset\n"
+        "                    Options: --source huggingface|kaggle|roboflow|url\n"
+        "  clone <url>       Clone a Git repository (pulls if already cloned)\n"
+        "                    Options: --install to auto-detect and install deps\n"
+        "  infer <model> <img>  Run inference on an image with a .pt model\n"
+        "\n"
+        "REPL SHORTCUTS (inside interactive mode)\n"
+        "  /help             Show in-REPL help\n"
+        "  /new              Start a new conversation session\n"
+        "  /sessions         List recent sessions\n"
+        "  /memory           Show persistent cross-session memory\n"
+        "  /memory add <txt> Add an entry to persistent memory\n"
+        "  /memory rm <key>  Remove memory entries matching keyword\n"
+        "  /quit, /exit      Exit the REPL (also: Ctrl+D)\n"
+        "\n"
+        "CONFIGURATION\n"
+        "  Config file : ~/.pico-agent/config.yaml\n"
+        "  Environment : PICO_API_KEY, PICO_MODEL, PICO_BASE_URL, PICO_PROVIDER\n"
+        "  Run `pico-agent --help` or visit https://hermes-agent.nousresearch.com for docs\n"
     )
 
 

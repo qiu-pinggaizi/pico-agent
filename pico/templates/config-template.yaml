@@ -1,0 +1,58 @@
+# ┌─────────────────────────────────────────────────────────────┐
+# │  Pico Agent — Configuration Template                       │
+# │  Copy to ~/.pico-agent/config.yaml and customise.         │
+# └─────────────────────────────────────────────────────────────┘
+
+# ─── Model Settings ────────────────────────────────────────────
+model:
+  # LLM provider: "openai" or "anthropic"
+  # Env override: PICO_PROVIDER
+  provider: openai
+
+  # Model identifier (e.g. "gpt-4o", "gpt-4o-mini", "claude-3-opus")
+  # Env override: PICO_MODEL
+  model: gpt-4o-mini
+
+  # API base URL (use ${VAR} syntax for secrets)
+  # Env override: PICO_BASE_URL
+  base_url: https://api.openai.com/v1
+
+  # API key — prefer env vars over hardcoding
+  # Env override: PICO_API_KEY
+  api_key: ""
+
+  # Sampling temperature (0.0 – 2.0, default 1.0)
+  temperature: 1.0
+
+# ─── Agent Settings ────────────────────────────────────────────
+agent:
+  # Max LLM ↔ tool-call turns per user interaction (default 50)
+  max_turns: 50
+
+  # Token budget for the context window (default 128 000)
+  max_tokens: 128000
+
+  # Fraction (0–1) of max_tokens that triggers context compression (default 0.80)
+  compression_threshold: 0.80
+
+# ─── Remote Servers (optional) ─────────────────────────────────
+# Define SSH targets for remote terminal / file-transfer tools.
+# servers:
+#   my-server:
+#     host: 192.168.1.100
+#     user: deploy
+#     key_file: ~/.ssh/id_ed25519    # optional
+#     port: 22                       # optional, default 22
+
+# default_server: my-server
+
+# ─── Environment Variable Overrides ────────────────────────────
+# The following env vars take precedence over config file values:
+#
+#   PICO_API_KEY     → model.api_key
+#   PICO_MODEL       → model.model
+#   PICO_BASE_URL    → model.base_url
+#   PICO_PROVIDER    → model.provider
+#
+# You can also use ${VAR_NAME} inside any string value:
+#   api_key: ${MY_API_KEY}

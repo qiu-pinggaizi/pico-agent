@@ -8,22 +8,14 @@ These are the "easy mode" tools that let users do complex tasks in one call:
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
 
 from pico.tools.registry import ToolRegistry
+from pico.tools.utils import _error, _success
 
 logger = logging.getLogger(__name__)
-
-
-def _success(data: Any) -> str:
-    return json.dumps({"success": True, **(data if isinstance(data, dict) else {"result": data})}, ensure_ascii=False)
-
-
-def _error(msg: str) -> str:
-    return json.dumps({"success": False, "error": msg}, ensure_ascii=False)
 
 
 def _run_cmd(cmd: list[str], cwd: str | None = None, timeout: int = 3600) -> tuple[int, str, str]:

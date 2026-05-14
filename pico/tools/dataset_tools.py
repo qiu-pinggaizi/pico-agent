@@ -5,7 +5,6 @@ Supports HuggingFace Hub, Kaggle, Roboflow, and general web search.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import subprocess
@@ -13,16 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from pico.tools.registry import ToolRegistry
+from pico.tools.utils import _error, _success
 
 logger = logging.getLogger(__name__)
-
-
-def _success(data: Any) -> str:
-    return json.dumps({"success": True, **(data if isinstance(data, dict) else {"result": data})}, ensure_ascii=False)
-
-
-def _error(msg: str) -> str:
-    return json.dumps({"success": False, "error": msg}, ensure_ascii=False)
 
 
 def _get_download_dir() -> Path:
@@ -333,11 +325,21 @@ def _download_url(url: str, output_path: Path) -> str:
         if filename.endswith(".zip"):
             import zipfile
             with zipfile.ZipFile(filepath, "r") as zf:
+                # Validate: no Zip Slip (member paths escaping target dir)
+                for member in zf.namelist():
+                    member_path = os.path.join(output_path, member)
+                    if not os.path.realpath(member_path).startswith(os.path.realpath(str(output_path)) + os.sep) and os.path.realpath(member_path) != os.path.realpath(str(output_path)):
+                        return _error(f"Zip Slip detected: {member} would escape target directory")
                 zf.extractall(output_path)
             extracted = True
         elif filename.endswith((".tar.gz", ".tgz", ".tar")):
             import tarfile
             with tarfile.open(filepath, "r:*") as tf:
+                # Validate: no path traversal in tar members
+                for member in tf.getmembers():
+                    member_path = os.path.join(output_path, member.name)
+                    if not os.path.realpath(member_path).startswith(os.path.realpath(str(output_path)) + os.sep) and os.path.realpath(member_path) != os.path.realpath(str(output_path)):
+                        return _error(f"Path traversal detected in tar: {member.name} would escape target directory")
                 tf.extractall(output_path)
             extracted = True
 

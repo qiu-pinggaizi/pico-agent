@@ -100,7 +100,26 @@ class Config:
         default_server: Default server name for remote operations.
     """
 
+    _VALID_PROVIDERS = ("openai", "anthropic")
+
     data: dict[str, Any] = field(repr=False)
+
+    def __post_init__(self) -> None:
+        self._validate()
+
+    def _validate(self) -> None:
+        """Validate configuration values and warn on suspicious settings."""
+        if self.max_tokens <= 0:
+            raise ValueError(f"max_tokens must be > 0, got {self.max_tokens}")
+        if self.max_turns <= 0:
+            raise ValueError(f"max_turns must be > 0, got {self.max_turns}")
+        if not (0 <= self.temperature <= 2):
+            raise ValueError(f"temperature must be between 0 and 2, got {self.temperature}")
+        provider = self.provider
+        if provider not in self._VALID_PROVIDERS:
+            raise ValueError(
+                f"provider must be one of {self._VALID_PROVIDERS}, got '{provider}'"
+            )
 
     @property
     def provider(self) -> str:
@@ -131,6 +150,10 @@ class Config:
         return float(self.data.get("agent", {}).get("compression_threshold", 0.80))
 
     @property
+    def temperature(self) -> float:
+        return float(self.data.get("model", {}).get("temperature", 1.0))
+
+    @property
     def servers(self) -> dict[str, Any]:
         return self.data.get("servers", {})
 
@@ -144,14 +167,12 @@ class Config:
         return str(CONFIG_DIR)
 
 
-def load_config(config_path: Path | str | None = None) -> Config:
-    """Load configuration from YAML file with environment variable overrides.
+def load_config(config_path: str | Path | None = None, *, strict: bool = False) -> Config:
+    """Load configuration from YAML file, with env var overrides.
 
     Args:
-        config_path: Path to config YAML. Defaults to ~/.pico-agent/config.yaml.
-
-    Returns:
-        Config instance.
+        config_path: Path to config YAML file. Uses default if None.
+        strict: If True, raise on invalid YAML instead of silently falling back.
     """
     if config_path is None:
         config_path = CONFIG_FILE
@@ -168,6 +189,8 @@ def load_config(config_path: Path | str | None = None) -> Config:
             data = _deep_merge(data, file_data)
             logger.info("Loaded config from %s", config_path)
         except Exception as e:
+            if strict:
+                raise ValueError(f"Invalid config file {config_path}: {e}") from e
             logger.warning("Failed to load config from %s: %s", config_path, e)
     else:
         logger.info("Config file %s not found, using defaults", config_path)

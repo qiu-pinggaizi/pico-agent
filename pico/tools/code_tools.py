@@ -5,7 +5,6 @@ Supports GitHub API search, git clone, dependency auto-install, and code snippet
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import subprocess
@@ -13,16 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from pico.tools.registry import ToolRegistry
+from pico.tools.utils import _error, _success
 
 logger = logging.getLogger(__name__)
-
-
-def _success(data: Any) -> str:
-    return json.dumps({"success": True, **(data if isinstance(data, dict) else {"result": data})}, ensure_ascii=False)
-
-
-def _error(msg: str) -> str:
-    return json.dumps({"success": False, "error": msg}, ensure_ascii=False)
 
 
 def _get_code_dir() -> Path:

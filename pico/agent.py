@@ -149,7 +149,7 @@ class AIAgent:
             return final_text
 
         # Exhausted max turns
-        exhausted_msg = "达到最大迭代次数，请重试。"
+        exhausted_msg = "Reached maximum tool-call iterations. Please try again."
         self.session.add_message(self.session_id, "assistant", exhausted_msg)
         return exhausted_msg
 

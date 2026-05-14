@@ -97,7 +97,7 @@ class ContextCompressor:
 
         summary_msg: dict[str, Any] = {
             "role": "system",
-            "content": f"[对话摘要]\n{summary_text}",
+            "content": f"[Conversation Summary]\n{summary_text}",
         }
 
         return [summary_msg] + kept_messages
@@ -118,18 +118,19 @@ class ContextCompressor:
 
         transcript = "\n".join(conversation_lines)
         prompt = (
-            "请用简洁的中文总结以下对话的关键信息，保留重要的事实、决定和待办事项。\n"
-            "不要添加额外的解释，只输出摘要内容。\n\n"
-            f"对话内容：\n{transcript}"
+            "Summarize the following conversation concisely in English. "
+            "Keep important facts, decisions, and action items. "
+            "Do not add extra commentary — output only the summary.\n\n"
+            f"Conversation:\n{transcript}"
         )
 
         try:
             resp = self.llm.chat(
                 messages=[{"role": "user", "content": prompt}],
                 tools=None,
-                system="你是一个对话摘要助手。请生成简洁准确的摘要。",
+                system="You are a conversation summarizer. Produce concise, accurate summaries.",
             )
             return resp.content if hasattr(resp, "content") else str(resp)
         except Exception as e:
             logger.error("Failed to generate compression summary: %s", e)
-            return f"[压缩失败: {e}] 对话共 {len(messages)} 条消息。"
+            return f"[Compression failed: {e}] Conversation had {len(messages)} messages."

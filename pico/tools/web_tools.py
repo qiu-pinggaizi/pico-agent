@@ -5,22 +5,14 @@ Uses httpx for HTTP requests and DuckDuckGo for search.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
 
 from pico.tools.registry import ToolRegistry
+from pico.tools.utils import _error, _success
 
 logger = logging.getLogger(__name__)
-
-
-def _success(data: Any) -> str:
-    return json.dumps({"success": True, **(data if isinstance(data, dict) else {"result": data})}, ensure_ascii=False)
-
-
-def _error(msg: str) -> str:
-    return json.dumps({"success": False, "error": msg}, ensure_ascii=False)
 
 
 def web_search(query: str, num_results: int = 5) -> str:

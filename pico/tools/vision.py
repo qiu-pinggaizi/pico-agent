@@ -6,23 +6,15 @@ Supports both base64-encoded images and file paths.
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from pico.tools.registry import ToolRegistry
+from pico.tools.utils import _error, _success
 
 logger = logging.getLogger(__name__)
-
-
-def _success(data: Any) -> str:
-    return json.dumps({"success": True, **(data if isinstance(data, dict) else {"result": data})}, ensure_ascii=False)
-
-
-def _error(msg: str) -> str:
-    return json.dumps({"success": False, "error": msg}, ensure_ascii=False)
 
 
 def _load_image_base64(image: str) -> tuple[str, str]:

@@ -174,6 +174,6 @@ class TestMaxTurns:
             )
 
         result = agent.run("Loop forever")
-        # The exhausted message is in Chinese per the source
-        assert "最大迭代" in result or "重试" in result
+        # The exhausted message is in English now
+        assert "maximum" in result.lower() or "iterations" in result.lower() or "retry" in result.lower()
         assert llm.call_count == max_turns

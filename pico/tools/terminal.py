@@ -5,27 +5,19 @@ Runs shell commands locally with configurable timeout and optional background mo
 
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 import time
 from typing import Any
 
 from pico.tools.registry import ToolRegistry
+from pico.tools.utils import _error, _success
 
 logger = logging.getLogger(__name__)
 
 # Track background processes
 _bg_processes: dict[str, subprocess.Popen] = {}
 _bg_counter = 0
-
-
-def _success(data: Any) -> str:
-    return json.dumps({"success": True, **(data if isinstance(data, dict) else {"result": data})}, ensure_ascii=False)
-
-
-def _error(msg: str) -> str:
-    return json.dumps({"success": False, "error": msg}, ensure_ascii=False)
 
 
 def terminal(command: str, timeout: int = 120, work_dir: str | None = None, background: bool = False) -> str:
