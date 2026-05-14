@@ -36,7 +36,7 @@ def _detect_dataset_structure(data_dir: str) -> dict[str, Any]:
     for name in ("classes.txt", "classes.names", "names.txt"):
         p = data_path / name
         if p.is_file():
-            classes = [l.strip() for l in p.read_text().strip().splitlines() if l.strip()]
+            classes = [line.strip() for line in p.read_text().strip().splitlines() if line.strip()]
             result["classes"] = classes
             result["num_classes"] = len(classes)
             result["classes_file"] = str(p)
@@ -121,7 +121,7 @@ def yolo_config_handler(args: dict[str, Any]) -> str:
                 "for name in ['classes.txt','classes.names','names.txt']:\n"
                 "    p = Path(data_dir) / name\n"
                 "    if p.is_file():\n"
-                "        classes = [l.strip() for l in p.read_text().strip().splitlines() if l.strip()]\n"
+                "        classes = [line.strip() for line in p.read_text().strip().splitlines() if line.strip()]\n"
                 "        break\n"
                 "data_path = Path(data_dir)\n"
                 "yaml_lines = [f'path: {data_dir}']\n"
@@ -150,7 +150,7 @@ def yolo_config_handler(args: dict[str, Any]) -> str:
         for name in ("classes.txt", "classes.names", "names.txt"):
             p = data_path / name
             if p.is_file():
-                classes = [l.strip() for l in p.read_text().strip().splitlines() if l.strip()]
+                classes = [line.strip() for line in p.read_text().strip().splitlines() if line.strip()]
                 break
 
         yaml_lines = [f"path: {data_dir}"]
@@ -289,7 +289,12 @@ def recommend_config_handler(args: dict[str, Any]) -> str:
             explore_result = json.loads(dataset_explore_handler({"data_dir": data_dir, "server": server}))
             stats = explore_result if explore_result.get("success") else {}
         else:
-            from pico.tools.detection.dataset import _detect_format, _find_classes_file, _read_classes_file, _IMAGE_EXTS
+            from pico.tools.detection.dataset import (
+                _IMAGE_EXTS,
+                _detect_format,
+                _find_classes_file,
+                _read_classes_file,
+            )
             data_path = Path(data_dir)
             fmt = _detect_format(data_dir)
             classes_file = _find_classes_file(data_dir)
@@ -297,7 +302,7 @@ def recommend_config_handler(args: dict[str, Any]) -> str:
             total_images = sum(1 for _ in data_path.rglob("*") if _.suffix.lower() in _IMAGE_EXTS)
             stats = {"format": fmt, "num_classes": len(classes), "total_images": total_images}
 
-        num_classes = stats.get("num_classes", 1)
+        _num_classes = stats.get("num_classes", 1)
         total_images = stats.get("total_images", 1000)
 
         # GPU memory estimation (default: 8GB)

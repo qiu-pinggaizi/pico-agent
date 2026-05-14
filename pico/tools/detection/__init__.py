@@ -10,44 +10,44 @@ import importlib.util
 import logging
 from typing import Any
 
-from pico.tools.detection.dataset import (
-    dataset_explore_handler,
-    dataset_split_handler,
-    dataset_convert_handler,
-)
 from pico.tools.detection.annotation import (
-    sam_annotate_handler,
     annotation_check_handler,
-    annotation_visualize_handler,
     annotation_convert_handler,
+    annotation_visualize_handler,
+    sam_annotate_handler,
 )
 from pico.tools.detection.config_gen import (
-    yolo_config_handler,
     mmdet_config_handler,
     recommend_config_handler,
+    yolo_config_handler,
 )
-from pico.tools.detection.trainer import (
-    train_start_handler,
-    train_monitor_handler,
-    train_analyze_handler,
-    train_resume_handler,
+from pico.tools.detection.dataset import (
+    dataset_convert_handler,
+    dataset_explore_handler,
+    dataset_split_handler,
 )
 from pico.tools.detection.evaluator import (
-    evaluate_handler,
-    pr_curve_handler,
-    confusion_matrix_handler,
     bad_cases_handler,
     compare_models_handler,
-)
-from pico.tools.detection.inference import (
-    inference_image_handler,
-    inference_batch_handler,
-    inference_video_handler,
+    confusion_matrix_handler,
+    evaluate_handler,
+    pr_curve_handler,
 )
 from pico.tools.detection.exporter import (
+    benchmark_handler,
     export_onnx_handler,
     export_tensorrt_handler,
-    benchmark_handler,
+)
+from pico.tools.detection.inference import (
+    inference_batch_handler,
+    inference_image_handler,
+    inference_video_handler,
+)
+from pico.tools.detection.trainer import (
+    train_analyze_handler,
+    train_monitor_handler,
+    train_resume_handler,
+    train_start_handler,
 )
 
 logger = logging.getLogger(__name__)

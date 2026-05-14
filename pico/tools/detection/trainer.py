@@ -9,8 +9,6 @@ from __future__ import annotations
 import csv
 import json
 import logging
-import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -265,7 +263,7 @@ def train_monitor_handler(args: dict[str, Any]) -> str:
                 return json.dumps({"success": True, "message": "Log file is empty — training may not have started.", "epochs": 0})
 
             last = rows[-1]
-            total_epochs = int(last.get("epoch", len(rows))) + 1
+            _total_epochs = int(last.get("epoch", len(rows))) + 1
             current_epoch = int(last.get("epoch", len(rows) - 1)) + 1
 
             # Extract common metrics
@@ -374,7 +372,7 @@ def train_analyze_handler(args: dict[str, Any]) -> str:
             train_loss_keys = [k for k in ("train/box_loss", "train/cls_loss", "train/dfl_loss") if k in rows[0]]
             val_loss_keys = [k for k in ("val/box_loss", "val/cls_loss", "val/dfl_loss") if k in rows[0]]
 
-            map50_values = [r.get(map50_key, 0) for r in rows] if map50_key in rows[0] else []
+            _map50_values = [r.get(map50_key, 0) for r in rows] if map50_key in rows[0] else []
             map5095_values = [r.get(map5095_key, 0) for r in rows] if map5095_key in rows[0] else []
 
             analysis: dict[str, Any] = {

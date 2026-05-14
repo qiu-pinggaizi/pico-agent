@@ -95,8 +95,9 @@ def vision_analyze(
     vision_model = model or "gpt-4o-mini"
 
     try:
-        from openai import OpenAI
         import os
+
+        from openai import OpenAI
 
         api_key = os.environ.get("PICO_API_KEY", "")
         base_url = os.environ.get("PICO_BASE_URL", "https://api.openai.com/v1")

@@ -9,11 +9,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from pico.session import MemorylessSession
 from pico.memory import NoMemory
+from pico.session import MemorylessSession
 
 if TYPE_CHECKING:
-    from pico.agent import AIAgent
+    pass
 
 logger = logging.getLogger(__name__)
 

@@ -15,7 +15,7 @@ from pico.compression import ContextCompressor
 from pico.config import Config
 from pico.llm import LLMProvider, create_provider
 from pico.memory import Memory, NoMemory
-from pico.session import SessionStore, MemorylessSession
+from pico.session import MemorylessSession, SessionStore
 from pico.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)

@@ -10,9 +10,12 @@ import importlib.util
 import logging
 from typing import Any
 
-from pico.tools.remote.ssh_client import get_ssh_client
+from pico.tools.remote.file_transfer import (
+    file_download_handler,
+    file_sync_handler,
+    file_upload_handler,
+)
 from pico.tools.remote.remote_terminal import remote_terminal_handler
-from pico.tools.remote.file_transfer import file_upload_handler, file_download_handler, file_sync_handler
 from pico.tools.remote.server_info import server_status_handler
 
 logger = logging.getLogger(__name__)

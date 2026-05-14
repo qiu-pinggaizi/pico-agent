@@ -105,7 +105,7 @@ def _search_roboflow_universe(query: str, max_results: int) -> list[dict]:
     import httpx
     try:
         # Roboflow Universe has a public search endpoint
-        resp = httpx.get(
+        resp = httpx.get(  # noqa: F841
             "https://universe.roboflow.com/datasets/search",
             params={"q": query, "limit": max_results},
             headers={"User-Agent": "Mozilla/5.0 (compatible; PicoAgent/0.1)"},
@@ -213,7 +213,7 @@ def dataset_download(
 def _download_huggingface(dataset_id: str, output_path: Path, subset: str, split: str) -> str:
     """Download dataset from HuggingFace using huggingface_hub."""
     try:
-        from huggingface_hub import snapshot_download, hf_hub_download
+        from huggingface_hub import hf_hub_download, snapshot_download
     except ImportError:
         return _error("huggingface_hub not installed. Run: pip install huggingface_hub")
 
@@ -296,7 +296,7 @@ def _download_roboflow(project_ref: str, output_path: Path) -> str:
         rf = Roboflow(api_key=rf_key)
         ws = rf.workspace(workspace)
         proj = ws.project(project)
-        dataset = proj.version(version or 1).download("yolov8", location=str(output_path))
+        _dataset = proj.version(version or 1).download("yolov8", location=str(output_path))
 
         return _success({
             "source": "roboflow",

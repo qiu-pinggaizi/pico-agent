@@ -8,12 +8,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections import Counter
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
-
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +20,7 @@ _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 def _read_classes_file(path: str) -> list[str]:
     if not path or not os.path.isfile(path):
         return []
-    return [l.strip() for l in Path(path).read_text().strip().splitlines() if l.strip()]
+    return [line.strip() for line in Path(path).read_text().strip().splitlines() if line.strip()]
 
 
 def _exec_cmd(command: str, server: str = "") -> dict[str, Any]:
@@ -284,7 +281,7 @@ def annotation_visualize_handler(args: dict[str, Any]) -> str:
     label_dir: str = args.get("label_dir", "") or image_dir
     output_dir: str = args.get("output_dir", "")
     classes_file: str = args.get("classes_file", "")
-    fmt: str = args.get("format", "yolo")
+    _fmt: str = args.get("format", "yolo")
     max_images: int = int(args.get("max_images", 50))
     server: str = args.get("server", "")
 

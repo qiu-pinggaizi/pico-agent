@@ -248,7 +248,6 @@ def _repl(agent: Any) -> None:
     try:
         from prompt_toolkit import PromptSession
         from prompt_toolkit.history import FileHistory
-        from prompt_toolkit.key_binding import KeyBindings
 
         history_path = agent.config.data.get("_history_path", "")
         history = FileHistory(history_path) if history_path else None
@@ -374,12 +373,12 @@ def main(argv: list[str] | None = None) -> None:
     _setup_logging(args.verbose)
 
     # Lazy imports to keep startup fast
-    from pico.config import load_config, CONFIG_DIR
+    from pico.agent import AIAgent
+    from pico.config import CONFIG_DIR, load_config
     from pico.memory import Memory
     from pico.session import SessionStore
-    from pico.tools.registry import ToolRegistry
     from pico.tools import discover_and_register
-    from pico.agent import AIAgent
+    from pico.tools.registry import ToolRegistry
 
     config = load_config(args.config)
 

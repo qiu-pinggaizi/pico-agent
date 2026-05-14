@@ -7,9 +7,9 @@ created lazily on first use and reused for subsequent calls.
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import os
-import socket
 import stat
 import time
 from pathlib import Path
@@ -244,12 +244,11 @@ class SSHClient:
 
     def download_dir(self, remote_dir: str, local_dir: str, exclude: list[str] | None = None) -> int:
         """Recursively download *remote_dir* to *local_dir*. Returns file count."""
-        import fnmatch
 
         exclude = exclude or []
         sftp = self._get_sftp()
-        count = 0
-        self._download_dir_recursive(sftp, remote_dir, local_dir, exclude, count_ref := [0])
+        count_ref = [0]
+        self._download_dir_recursive(sftp, remote_dir, local_dir, exclude, count_ref)
         return count_ref[0]
 
     def _download_dir_recursive(

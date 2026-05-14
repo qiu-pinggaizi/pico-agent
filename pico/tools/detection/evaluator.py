@@ -7,6 +7,7 @@ remote execution via the ``server`` parameter.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -139,7 +140,7 @@ def evaluate_handler(args: dict[str, Any]) -> str:
             dict_match = re.search(r"\{[^{}]*'coco/bbox_mAP'[^{}]*\}", output)
             if dict_match:
                 try:
-                    eval_dict = eval(dict_match.group())  # noqa: S307 — controlled input
+                    eval_dict = ast.literal_eval(dict_match.group())
                     metrics.update({k: round(v, 6) if isinstance(v, float) else v for k, v in eval_dict.items()})
                 except Exception:
                     pass

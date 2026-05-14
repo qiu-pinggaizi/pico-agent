@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -83,7 +82,7 @@ def _detect_dataset_structure(data_dir: Path) -> dict:
 
         for split in ["train", "val", "test"]:
             split_img = images_dir / split
-            split_lbl = labels_dir / split
+            _split_lbl = labels_dir / split
             if split_img.exists():
                 count = len(list(split_img.glob("*.jpg"))) + len(list(split_img.glob("*.png"))) + len(list(split_img.glob("*.jpeg")))
                 result[f"{split}_count"] = count
@@ -104,7 +103,7 @@ def _detect_dataset_structure(data_dir: Path) -> dict:
         # Try to find classes.txt
         classes_file = data_dir / "classes.txt"
         if classes_file.exists():
-            result["classes"] = [l.strip() for l in classes_file.read_text().splitlines() if l.strip()]
+            result["classes"] = [line.strip() for line in classes_file.read_text().splitlines() if line.strip()]
 
         return result
 
@@ -454,7 +453,7 @@ def quick_eval(
                         metrics[key] = float(nums[-1])
 
         # Find output directory
-        val_dir = mp.parent.parent / f"val" if mp.parent.name == "weights" else mp.parent
+        val_dir = mp.parent.parent / "val" if mp.parent.name == "weights" else mp.parent
 
         result = {
             "model": str(mp),
