@@ -24,7 +24,7 @@ def _estimate_tokens(text: str) -> int:
 
 
 def _messages_token_count(messages: list[dict[str, Any]]) -> int:
-    """Sum estimated tokens over all messages."""
+    """Sum estimated tokens over all messages, including tool_calls."""
     total = 0
     for msg in messages:
         content = msg.get("content", "")
@@ -34,6 +34,12 @@ def _messages_token_count(messages: list[dict[str, Any]]) -> int:
             for block in content:
                 if isinstance(block, dict):
                     total += _estimate_tokens(str(block.get("text", "")))
+        # Count tool_calls arguments as tokens too
+        tool_calls = msg.get("tool_calls", [])
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                total += _estimate_tokens(str(tc.get("name", "")))
+                total += _estimate_tokens(str(tc.get("arguments", "")))
     return total
 
 

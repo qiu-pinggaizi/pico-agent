@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -92,15 +93,22 @@ def vision_analyze(
         return _error(f"Failed to load image: {e}")
 
     # Default vision model
-    vision_model = model or "gpt-4o-mini"
+    vision_model = model
+    if not vision_model:
+        try:
+            from pico.config import get_config
+            cfg = get_config()
+            vision_model = cfg.model
+        except Exception:
+            vision_model = "gpt-4o-mini"
 
     try:
-        import os
-
         from openai import OpenAI
+        from pico.config import get_config
 
-        api_key = os.environ.get("PICO_API_KEY", "")
-        base_url = os.environ.get("PICO_BASE_URL", "https://api.openai.com/v1")
+        cfg = get_config()
+        api_key = cfg.api_key or os.environ.get("PICO_API_KEY", "")
+        base_url = cfg.base_url or os.environ.get("PICO_BASE_URL", "https://api.openai.com/v1")
 
         client = OpenAI(api_key=api_key, base_url=base_url)
 

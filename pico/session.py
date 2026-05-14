@@ -29,13 +29,19 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE TABLE IF NOT EXISTS messages (
-    id           TEXT PRIMARY KEY,
-    session_id   TEXT NOT NULL REFERENCES sessions(id),
-    role         TEXT NOT NULL,
-    content      TEXT NOT NULL DEFAULT '',
-    tool_call_id TEXT,
-    timestamp    TEXT NOT NULL
+    id             TEXT PRIMARY KEY,
+    session_id     TEXT NOT NULL REFERENCES sessions(id),
+    role           TEXT NOT NULL,
+    content        TEXT NOT NULL DEFAULT '',
+    tool_call_id   TEXT,
+    tool_calls_json TEXT,
+    timestamp      TEXT NOT NULL
 );
+"""
+
+# Migration: add tool_calls_json column if missing
+_MIGRATION_SQL = """\
+ALTER TABLE messages ADD COLUMN tool_calls_json TEXT;
 """
 
 
@@ -58,6 +64,7 @@ class MessageRecord:
     role: str
     content: str
     tool_call_id: str | None
+    tool_calls_json: str | None
     timestamp: str
 
 
@@ -87,6 +94,12 @@ class SessionStore:
         conn = self._get_conn()
         conn.executescript(_SCHEMA_SQL)
         conn.commit()
+        # Migration: add tool_calls_json if missing
+        try:
+            conn.executescript(_MIGRATION_SQL)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
         logger.debug("Session DB initialised at %s", self.db_path)
 
     def close(self) -> None:
@@ -148,15 +161,19 @@ class SessionStore:
         role: str,
         content: str,
         tool_call_id: str | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
     ) -> str:
         """Add a message to a session. Returns message ID."""
+        import json as _json
+
         mid = str(uuid.uuid4())
         now = _now()
         conn = self._get_conn()
+        tc_json = _json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None
         conn.execute(
-            "INSERT INTO messages (id, session_id, role, content, tool_call_id, timestamp) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (mid, session_id, role, content, tool_call_id, now),
+            "INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls_json, timestamp) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (mid, session_id, role, content, tool_call_id, tc_json, now),
         )
         conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
         conn.commit()
@@ -173,12 +190,19 @@ class SessionStore:
 
     def get_messages_as_dicts(self, session_id: str) -> list[dict[str, Any]]:
         """Return messages in the OpenAI-style dict format."""
+        import json as _json
+
         records = self.get_messages(session_id)
         msgs: list[dict[str, Any]] = []
         for r in records:
             d: dict[str, Any] = {"role": r.role, "content": r.content}
             if r.tool_call_id:
                 d["tool_call_id"] = r.tool_call_id
+            if r.tool_calls_json:
+                try:
+                    d["tool_calls"] = _json.loads(r.tool_calls_json)
+                except (ValueError, TypeError):
+                    pass
             msgs.append(d)
         return msgs
 
@@ -198,8 +222,13 @@ class MemorylessSession:
     def __init__(self) -> None:
         self.messages: list[dict[str, Any]] = []
 
-    def add_message(self, session_id: str, role: str, content: str, tool_call_id: str | None = None) -> str:
-        self.messages.append({"role": role, "content": content, "tool_call_id": tool_call_id})
+    def add_message(self, session_id: str, role: str, content: str, tool_call_id: str | None = None, tool_calls: list[dict[str, Any]] | None = None) -> str:
+        msg: dict[str, Any] = {"role": role, "content": content}
+        if tool_call_id:
+            msg["tool_call_id"] = tool_call_id
+        if tool_calls:
+            msg["tool_calls"] = tool_calls
+        self.messages.append(msg)
         return ""
 
     def get_messages_as_dicts(self, session_id: str) -> list[dict[str, Any]]:

@@ -147,9 +147,10 @@ class OpenAIProvider(LLMProvider):
 class AnthropicProvider(LLMProvider):
     """Anthropic Claude API provider."""
 
-    def __init__(self, model: str, api_key: str) -> None:
+    def __init__(self, model: str, api_key: str, max_tokens: int = 8192) -> None:
         self.model = model
         self.api_key = api_key
+        self.max_tokens = max_tokens
 
     def _convert_tools_for_anthropic(
         self, tools: list[dict[str, Any]]
@@ -276,7 +277,7 @@ class AnthropicProvider(LLMProvider):
             "model": self.model,
             "messages": converted_messages,
             "system": system_text,
-            "max_tokens": 4096,
+            "max_tokens": self.max_tokens,
         }
         if tools:
             kwargs["tools"] = self._convert_tools_for_anthropic(tools)
@@ -336,6 +337,7 @@ def create_provider(config: Any) -> LLMProvider:
         return AnthropicProvider(
             model=config.model,
             api_key=config.api_key,
+            max_tokens=config.max_tokens,
         )
     else:
         raise ValueError(f"Unknown LLM provider: {provider_name}")

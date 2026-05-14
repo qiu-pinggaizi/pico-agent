@@ -138,6 +138,11 @@ class Config:
     def default_server(self) -> str:
         return self.data.get("default_server", "")
 
+    @property
+    def base_dir(self) -> str:
+        """Base directory for pico-agent data (datasets, repos, etc.)."""
+        return str(CONFIG_DIR)
+
 
 def load_config(config_path: Path | str | None = None) -> Config:
     """Load configuration from YAML file with environment variable overrides.

@@ -14,8 +14,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,18 @@ def _rich_print(text: str) -> None:
         console.print(Markdown(text))
     except ImportError:
         print(text)
+
+
+def _rich_print_json(data: dict) -> None:
+    """Print a dict as formatted JSON."""
+    try:
+        from rich.console import Console
+        from rich.syntax import Syntax
+
+        console = Console()
+        console.print(Syntax(json.dumps(data, indent=2, ensure_ascii=False), "json"))
+    except ImportError:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def _rich_print_sessions(sessions: list[Any]) -> None:
@@ -152,38 +166,91 @@ def _handle_slash_command(cmd: str, agent: Any) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Shortcut commands — bypass REPL, directly invoke tools
+# Path validation helpers
 # ---------------------------------------------------------------------------
 
-def _shortcut_train(agent: Any, args: argparse.Namespace) -> None:
+def _validate_dir(path: str, label: str = "Directory") -> str | None:
+    """Validate that a path is an existing directory. Returns error string or None."""
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        return f"{label} not found: {path}"
+    if not p.is_dir():
+        return f"{label} is not a directory: {path}"
+    return None
+
+
+def _validate_file(path: str, label: str = "File") -> str | None:
+    """Validate that a path is an existing file. Returns error string or None."""
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        return f"{label} not found: {path}"
+    if not p.is_file():
+        return f"{label} is not a file: {path}"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Shortcut commands — directly invoke tools (bypass LLM when possible)
+# ---------------------------------------------------------------------------
+
+def _shortcut_train(agent: Any, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent train <data_dir> [--model X] [--epochs N] [--dry-run]"""
     data_dir = args.data_dir
-    prompt_parts = [f"Train a detection model on the dataset at {data_dir}."]
+    err = _validate_dir(data_dir, "Dataset directory")
+    if err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    # Direct tool call — skip LLM
+    tool_args: dict[str, Any] = {"data_dir": str(Path(data_dir).expanduser().resolve())}
     if args.model:
-        prompt_parts.append(f"Use model {args.model}.")
+        tool_args["model"] = args.model
     if args.epochs:
-        prompt_parts.append(f"Train for {args.epochs} epochs.")
+        tool_args["epochs"] = args.epochs
     if args.batch:
-        prompt_parts.append(f"Batch size {args.batch}.")
-    if args.dry_run:
-        prompt_parts.append("Show me the training plan first (dry run), don't start yet.")
-    else:
-        prompt_parts.append("Start training now.")
+        tool_args["batch"] = args.batch
+    tool_args["dry_run"] = args.dry_run
 
-    prompt = " ".join(prompt_parts)
-    _single_shot(agent, prompt)
+    result = agent.tools.dispatch("auto_train", tool_args)
+    try:
+        data = json.loads(result)
+        if data.get("success"):
+            _rich_print_json(data)
+            return 0
+        else:
+            print(f"Error: {data.get('error', 'Unknown error')}", file=sys.stderr)
+            return 1
+    except json.JSONDecodeError:
+        print(result)
+        return 0
 
 
-def _shortcut_eval(agent: Any, args: argparse.Namespace) -> None:
+def _shortcut_eval(agent: Any, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent eval <model_path> [--data data.yaml]"""
-    prompt = f"Evaluate the model at {args.model_path}."
+    err = _validate_file(args.model_path, "Model file")
+    if err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    tool_args: dict[str, Any] = {"model_path": str(Path(args.model_path).expanduser().resolve())}
     if args.data:
-        prompt += f" Use data config {args.data}."
-    prompt += " Show mAP, precision, recall, and any bad cases."
-    _single_shot(agent, prompt)
+        tool_args["data_yaml"] = args.data
+
+    result = agent.tools.dispatch("quick_eval", tool_args)
+    try:
+        data = json.loads(result)
+        if data.get("success"):
+            _rich_print_json(data)
+            return 0
+        else:
+            print(f"Error: {data.get('error', 'Unknown error')}", file=sys.stderr)
+            return 1
+    except json.JSONDecodeError:
+        print(result)
+        return 0
 
 
-def _shortcut_search(agent: Any, args: argparse.Namespace) -> None:
+def _shortcut_search(agent: Any, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent search <query> [--source github|huggingface|all]"""
     source = args.source or "all"
     if source == "all":
@@ -192,10 +259,10 @@ def _shortcut_search(agent: Any, args: argparse.Namespace) -> None:
         prompt = f"Search GitHub for '{args.query}' repositories. Show top results with stars and clone URLs."
     else:
         prompt = f"Search {source} for '{args.query}' datasets. Show me the results."
-    _single_shot(agent, prompt)
+    return _single_shot(agent, prompt)
 
 
-def _shortcut_download(agent: Any, args: argparse.Namespace) -> None:
+def _shortcut_download(agent: Any, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent download <query_or_url> [--source huggingface|kaggle|url]"""
     source = args.source or "huggingface"
     if args.query_or_url.startswith("http"):
@@ -205,45 +272,78 @@ def _shortcut_download(agent: Any, args: argparse.Namespace) -> None:
             f"Find and download a dataset matching '{args.query_or_url}' from {source}. "
             "Search first, then download the best match."
         )
-    _single_shot(agent, prompt)
+    return _single_shot(agent, prompt)
 
 
-def _shortcut_clone(agent: Any, args: argparse.Namespace) -> None:
+def _shortcut_clone(agent: Any, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent clone <url> [--install]"""
-    prompt = f"Clone the repository at {args.url}."
-    if args.install:
-        prompt += " After cloning, auto-detect and install its dependencies."
-    if args.browse:
-        prompt += " Then show me the directory structure."
-    _single_shot(agent, prompt)
+    # Direct tool call
+    tool_args: dict[str, Any] = {"url": args.url}
+    result = agent.tools.dispatch("code_clone", tool_args)
+    try:
+        data = json.loads(result)
+        if not data.get("success"):
+            print(f"Error: {data.get('error', 'Unknown error')}", file=sys.stderr)
+            return 1
+
+        _rich_print_json(data)
+
+        if args.install and data.get("success"):
+            clone_path = data.get("path", "")
+            if clone_path:
+                print("\nInstalling dependencies...")
+                install_result = agent.tools.dispatch("code_install", {"repo_path": clone_path})
+                install_data = json.loads(install_result)
+                _rich_print_json(install_data)
+                return 0 if install_data.get("success") else 1
+        return 0
+    except json.JSONDecodeError:
+        print(result)
+        return 0
 
 
-def _shortcut_infer(agent: Any, args: argparse.Namespace) -> None:
+def _shortcut_infer(agent: Any, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent infer <model_path> <image_path>"""
+    err = _validate_file(args.model_path, "Model file")
+    if err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    err = _validate_file(args.image_path, "Image file")
+    if err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
     prompt = f"Run inference with model {args.model_path} on image {args.image_path}. Show the results."
-    _single_shot(agent, prompt)
+    return _single_shot(agent, prompt)
 
 
 # ---------------------------------------------------------------------------
 # Single-shot mode
 # ---------------------------------------------------------------------------
 
-def _single_shot(agent: Any, message: str) -> None:
-    """Run a single message and print the response."""
+def _single_shot(agent: Any, message: str) -> int:
+    """Run a single message through the LLM and print the response.
+
+    Returns:
+        Exit code (0 for success, 1 for error).
+    """
     try:
         response = agent.run(message)
         _rich_print(response)
+        return 0
     except KeyboardInterrupt:
         print("\nCancelled.")
+        return 130
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
+        return 1
 
 
 # ---------------------------------------------------------------------------
 # REPL mode
 # ---------------------------------------------------------------------------
 
-def _repl(agent: Any) -> None:
+def _repl(agent: Any) -> int:
     """Interactive REPL with prompt_toolkit."""
     try:
         from prompt_toolkit import PromptSession
@@ -263,9 +363,14 @@ def _repl(agent: Any) -> None:
                 user_input = session.prompt(">>> ").strip()
             else:
                 user_input = input(">>> ").strip()
-        except (KeyboardInterrupt, EOFError):
+        except KeyboardInterrupt:
+            # Ctrl+C at prompt: print newline and continue (don't exit)
+            print()
+            continue
+        except EOFError:
+            # Ctrl+D: exit cleanly
             print("\nGoodbye!")
-            break
+            return 0
 
         if not user_input:
             continue
@@ -278,7 +383,7 @@ def _repl(agent: Any) -> None:
                     _rich_print(result)
             except SystemExit:
                 print("Goodbye!")
-                break
+                return 0
             continue
 
         # Regular message → run agent
@@ -299,7 +404,7 @@ def _repl(agent: Any) -> None:
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point.
 
-    Supports both interactive REPL and shortcut commands.
+    Supports both interactive REPL, single-shot messages, and shortcut commands.
 
     Examples:
         pico-agent                              # Interactive REPL
@@ -312,65 +417,48 @@ def main(argv: list[str] | None = None) -> None:
         pico-agent clone https://github.com/user/repo --install
         pico-agent infer best.pt image.jpg
     """
-    parser = argparse.ArgumentParser(
-        prog="pico-agent",
-        description="Pico Agent — AI agent with tool use, dataset/code download, and detection training",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Shortcut commands:\n"
-            "  train    Auto-detect dataset and start training\n"
-            "  eval     Evaluate a trained model\n"
-            "  search   Search GitHub / HuggingFace\n"
-            "  download Search and download a dataset\n"
-            "  clone    Clone a Git repository\n"
-            "  infer    Run inference on an image\n"
-        ),
-    )
-    parser.add_argument("--session", "-s", help="Resume a specific session by ID")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
-    parser.add_argument("--config", "-c", help="Path to config YAML file")
+    if argv is None:
+        argv = sys.argv[1:]
 
-    subparsers = parser.add_subparsers(dest="command")
+    KNOWN_COMMANDS = {"train", "eval", "search", "download", "clone", "infer"}
 
-    # train
-    p_train = subparsers.add_parser("train", help="Auto-detect dataset and start training")
-    p_train.add_argument("data_dir", help="Path to dataset directory")
-    p_train.add_argument("--model", "-m", default="", help="YOLO model (e.g. yolov8n, yolov8s)")
-    p_train.add_argument("--epochs", "-e", type=int, default=0, help="Training epochs (0=auto)")
-    p_train.add_argument("--batch", "-b", type=int, default=0, help="Batch size (0=auto)")
-    p_train.add_argument("--dry-run", "-n", action="store_true", help="Show plan without training")
+    # --- Manual global flag extraction (avoids argparse subparser issues) ---
+    session_id_arg = ""
+    verbose = False
+    config_path = None
+    positional: list[str] = []
 
-    # eval
-    p_eval = subparsers.add_parser("eval", help="Evaluate a trained model")
-    p_eval.add_argument("model_path", help="Path to .pt model weights")
-    p_eval.add_argument("--data", "-d", default="", help="Path to data.yaml")
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("--help", "-h"):
+            _print_help()
+            sys.exit(0)
+        elif a in ("--session", "-s") and i + 1 < len(argv):
+            session_id_arg = argv[i + 1]; i += 2
+        elif a.startswith("--session="):
+            session_id_arg = a.split("=", 1)[1]; i += 1
+        elif a in ("--verbose", "-v"):
+            verbose = True; i += 1
+        elif a in ("--config", "-c") and i + 1 < len(argv):
+            config_path = argv[i + 1]; i += 2
+        elif a.startswith("--config="):
+            config_path = a.split("=", 1)[1]; i += 1
+        elif a == "--":
+            positional.extend(argv[i + 1:]); break
+        else:
+            positional.append(a); i += 1
 
-    # search
-    p_search = subparsers.add_parser("search", help="Search GitHub / HuggingFace")
-    p_search.add_argument("query", help="Search query")
-    p_search.add_argument("--source", choices=["github", "huggingface", "kaggle", "all"], default="all")
+    _setup_logging(verbose)
 
-    # download
-    p_download = subparsers.add_parser("download", help="Search and download a dataset")
-    p_download.add_argument("query_or_url", help="Search query or direct URL")
-    p_download.add_argument("--source", choices=["huggingface", "kaggle", "roboflow", "url"], default="huggingface")
+    # --- Route: command vs single-shot vs REPL ---
+    command = None
+    command_args: argparse.Namespace | None = None
 
-    # clone
-    p_clone = subparsers.add_parser("clone", help="Clone a Git repository")
-    p_clone.add_argument("url", help="Git URL")
-    p_clone.add_argument("--install", "-i", action="store_true", help="Auto-install dependencies")
-    p_clone.add_argument("--browse", "-b", action="store_true", help="Show directory structure after clone")
-
-    # infer
-    p_infer = subparsers.add_parser("infer", help="Run inference on an image")
-    p_infer.add_argument("model_path", help="Path to .pt model weights")
-    p_infer.add_argument("image_path", help="Path to image file")
-
-    # "message" for bare positional (backward compat)
-    parser.add_argument("message", nargs="?", help=argparse.SUPPRESS)
-
-    args = parser.parse_args(argv)
-    _setup_logging(args.verbose)
+    if positional and positional[0] in KNOWN_COMMANDS:
+        command = positional[0]
+        command_args = _parse_command_args(command, positional[1:])
+    # else: single-shot message or REPL
 
     # Lazy imports to keep startup fast
     from pico.agent import AIAgent
@@ -380,7 +468,7 @@ def main(argv: list[str] | None = None) -> None:
     from pico.tools import discover_and_register
     from pico.tools.registry import ToolRegistry
 
-    config = load_config(args.config)
+    config = load_config(config_path)
 
     # Set up history file
     history_path = str(CONFIG_DIR / "history")
@@ -391,35 +479,99 @@ def main(argv: list[str] | None = None) -> None:
     registry = ToolRegistry()
     discover_and_register(registry)
 
-    session_id = args.session or ""
-
     agent = AIAgent(
         config=config,
         tool_registry=registry,
         session=session_store,
         memory=memory,
-        session_id=session_id,
+        session_id=session_id_arg,
     )
 
-    # Handle shortcut commands
-    if args.command == "train":
-        _shortcut_train(agent, args)
-    elif args.command == "eval":
-        _shortcut_eval(agent, args)
-    elif args.command == "search":
-        _shortcut_search(agent, args)
-    elif args.command == "download":
-        _shortcut_download(agent, args)
-    elif args.command == "clone":
-        _shortcut_clone(agent, args)
-    elif args.command == "infer":
-        _shortcut_infer(agent, args)
-    elif args.message:
-        _single_shot(agent, args.message)
-    else:
-        _repl(agent)
+    exit_code = 0
 
-    session_store.close()
+    try:
+        if command == "train" and command_args:
+            exit_code = _shortcut_train(agent, command_args)
+        elif command == "eval" and command_args:
+            exit_code = _shortcut_eval(agent, command_args)
+        elif command == "search" and command_args:
+            exit_code = _shortcut_search(agent, command_args)
+        elif command == "download" and command_args:
+            exit_code = _shortcut_download(agent, command_args)
+        elif command == "clone" and command_args:
+            exit_code = _shortcut_clone(agent, command_args)
+        elif command == "infer" and command_args:
+            exit_code = _shortcut_infer(agent, command_args)
+        elif positional:
+            message = " ".join(positional)
+            exit_code = _single_shot(agent, message)
+        else:
+            exit_code = _repl(agent)
+    finally:
+        session_store.close()
+
+    sys.exit(exit_code or 0)
+
+
+def _print_help() -> None:
+    """Print help text (not auto-generated, to avoid argparse issues)."""
+    print(
+        "usage: pico-agent [-h] [-s SESSION] [-v] [-c CONFIG] [command ... | message]\n\n"
+        "Pico Agent — AI agent with tool use, dataset/code download, and detection\n"
+        "training\n\n"
+        "options:\n"
+        "  -h, --help            show this help message and exit\n"
+        "  -s, --session SESSION Resume a specific session by ID\n"
+        "  -v, --verbose         Enable debug logging\n"
+        "  -c, --config CONFIG   Path to config YAML file\n\n"
+        "Shortcut commands:\n"
+        "  train    Auto-detect dataset and start training\n"
+        "  eval     Evaluate a trained model\n"
+        "  search   Search GitHub / HuggingFace\n"
+        "  download Search and download a dataset\n"
+        "  clone    Clone a Git repository\n"
+        "  infer    Run inference on an image\n\n"
+        "Examples:\n"
+        "  pico-agent                              # Interactive REPL\n"
+        '  pico-agent "what\'s 2+2?"                # Single-shot\n'
+        "  pico-agent train ./datasets/traffic     # Quick train\n"
+        "  pico-agent train ./data --model yolov8s --dry-run\n"
+        "  pico-agent eval runs/train/weights/best.pt\n"
+        '  pico-agent search "RT-DETR" --source github\n'
+        '  pico-agent download "coco 2017" --source huggingface\n'
+        "  pico-agent clone https://github.com/user/repo --install\n"
+        "  pico-agent infer best.pt image.jpg"
+    )
+
+
+def _parse_command_args(command: str, args: list[str]) -> argparse.Namespace:
+    """Parse subcommand-specific arguments."""
+    parser = argparse.ArgumentParser(prog=f"pico-agent {command}")
+
+    if command == "train":
+        parser.add_argument("data_dir", help="Path to dataset directory")
+        parser.add_argument("--model", "-m", default="", help="YOLO model (e.g. yolov8n, yolov8s)")
+        parser.add_argument("--epochs", "-e", type=int, default=0, help="Training epochs (0=auto)")
+        parser.add_argument("--batch", "-b", type=int, default=0, help="Batch size (0=auto)")
+        parser.add_argument("--dry-run", "-n", action="store_true", help="Show plan without training")
+    elif command == "eval":
+        parser.add_argument("model_path", help="Path to .pt model weights")
+        parser.add_argument("--data", "-d", default="", help="Path to data.yaml")
+    elif command == "search":
+        parser.add_argument("query", help="Search query")
+        parser.add_argument("--source", choices=["github", "huggingface", "kaggle", "all"], default="all")
+    elif command == "download":
+        parser.add_argument("query_or_url", help="Search query or direct URL")
+        parser.add_argument("--source", choices=["huggingface", "kaggle", "roboflow", "url"], default="huggingface")
+    elif command == "clone":
+        parser.add_argument("url", help="Git URL")
+        parser.add_argument("--install", "-i", action="store_true", help="Auto-install dependencies")
+        parser.add_argument("--browse", "-b", action="store_true", help="Show directory structure after clone")
+    elif command == "infer":
+        parser.add_argument("model_path", help="Path to .pt model weights")
+        parser.add_argument("image_path", help="Path to image file")
+
+    return parser.parse_args(args)
 
 
 if __name__ == "__main__":

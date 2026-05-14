@@ -116,14 +116,23 @@ class AIAgent:
                 }
                 messages.append(assistant_msg)
 
+                # Persist the assistant message with tool_calls
+                self.session.add_message(
+                    self.session_id, "assistant", response.content or "",
+                    tool_calls=[{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in response.tool_calls],
+                )
+
                 for tc in response.tool_calls:
                     logger.info("Tool call: %s(%s)", tc.name, tc.arguments)
                     result = self.tools.dispatch(tc.name, tc.arguments)
-                    messages.append({
+                    tool_msg = {
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "content": result,
-                    })
+                    }
+                    messages.append(tool_msg)
+                    # Persist tool result
+                    self.session.add_message(self.session_id, "tool", result, tool_call_id=tc.id)
                 continue
 
             # Pure text response — save and return
@@ -149,25 +158,34 @@ class AIAgent:
     # ------------------------------------------------------------------
 
     def _build_system_prompt(self) -> str:
-        """Build the system prompt including memory context."""
+        """Build the system prompt including memory context and dynamic tool list."""
         parts: list[str] = [
             "You are Pico Agent — an AI assistant that GETS THINGS DONE with minimal user effort.\n\n"
             "## Core Principle\n"
             "You do the work, not the user. When a user gives a vague request, "
             "you figure out the details and execute step by step. Never ask the user "
             "to do things manually that you can do with tools.\n\n"
-            "## Available Tools\n"
-            "File: `read_file`, `write_file`, `search_files`\n"
-            "Terminal: `terminal`\n"
-            "Web: `web_search`, `web_extract`\n"
-            "Vision: `vision_analyze`\n"
-            "Dataset: `dataset_search`, `dataset_download`, `dataset_info`\n"
-            "Code: `code_search`, `code_clone`, `code_install`, `code_browse`, `code_exec`, `code_list`\n"
-            "Training (easy): `auto_train`, `quick_eval`, `deploy_model`\n"
-            "Training (advanced): `yolo_config`, `train_start`, `train_monitor`, `evaluate`, `bad_cases`\n"
-            "Annotation: `sam_annotate`, `convert_annotation`\n"
-            "Export: `export_onnx`, `export_trt`, `benchmark`\n"
-            "Remote: `remote_terminal`, `remote_file_upload`, `remote_file_download`, `remote_file_sync`, `remote_server_info`\n\n"
+        ]
+
+        # Dynamic tool list from registry — always in sync
+        tool_list_parts: list[str] = ["## Available Tools\n"]
+        schemas = self.tools.get_schemas()
+        # Group by prefix for readability
+        groups: dict[str, list[str]] = {}
+        for schema in schemas:
+            name = schema.get("name", "unknown")
+            # Extract prefix (first word before underscore or whole name)
+            prefix = name.split("_")[0] if "_" in name else name
+            groups.setdefault(prefix, []).append(name)
+
+        for prefix, names in sorted(groups.items()):
+            display_prefix = prefix.capitalize()
+            tool_list_parts.append(f"- **{display_prefix}**: {', '.join(f'`{n}`' for n in sorted(names))}")
+        tool_list_parts.append("")
+
+        parts.append("\n".join(tool_list_parts))
+
+        parts.append(
             "## Workflow Patterns\n"
             "When the user says something like 'train a model on my data':\n"
             "1. Call `auto_train(data_dir=<path>)` — it handles everything: detect format, generate YAML, recommend model, start training.\n"
@@ -191,7 +209,7 @@ class AIAgent:
             "- After any major task, summarize what was done and suggest next steps.\n"
             "- If something fails, suggest fixes rather than just reporting the error.\n"
             "- Use dry_run=true for destructive operations first if unsure.",
-        ]
+        )
 
         memory_content = self.memory.load()
         if memory_content:
