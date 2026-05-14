@@ -1,0 +1,24 @@
+# Pico Agent 示例配置
+# 复制到 ~/.pico-agent/config.yaml 并填入你的 API key
+
+model:
+  provider: openai          # openai | anthropic
+  model: gpt-4o-mini
+  base_url: https://api.openai.com/v1
+  api_key: ${PICO_API_KEY}  # 环境变量引用
+
+agent:
+  max_turns: 50
+  max_tokens: 128000
+  compression_threshold: 0.80  # 超过 80% token 限制时压缩
+
+# 远程服务器配置（可选）
+servers: {}
+#   gpu-server:
+#     host: 192.168.1.100
+#     port: 22
+#     user: admin
+#     key_path: ~/.ssh/id_rsa
+#     conda_env: base
+
+default_server: ""
