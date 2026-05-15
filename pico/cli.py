@@ -571,13 +571,7 @@ def main(argv: list[str] | None = None) -> None:
     if command is None and not positional and not sys.stdin.isatty():
         piped_input = sys.stdin.read().strip()
         if piped_input:
-            try:
-                response = agent.run(piped_input)
-                _rich_print(response)
-            except Exception as e:
-                # Catch LLM provider errors (OpenAIError, APIError, etc.)
-                _print_error(str(e))
-                exit_code = 1
+            exit_code = _single_shot(agent, piped_input)
         session_store.close()
         sys.exit(exit_code or 0)
 
