@@ -97,7 +97,7 @@ def _search_roboflow_universe(query: str, max_results: int) -> list[dict]:
     import httpx
     try:
         # Roboflow Universe has a public search endpoint
-        resp = httpx.get(  # noqa: F841
+        httpx.get(
             "https://universe.roboflow.com/datasets/search",
             params={"q": query, "limit": max_results},
             headers={"User-Agent": "Mozilla/5.0 (compatible; PicoAgent/0.1)"},

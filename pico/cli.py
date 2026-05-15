@@ -25,6 +25,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ANSI color codes for terminal output
+_RED = "\033[31m"
+_BOLD = "\033[1m"
+_DIM = "\033[2m"
+_RESET = "\033[0m"
+
+
+def _print_error(msg: str) -> None:
+    """Print an error message in red to stderr."""
+    if sys.stderr.isatty():
+        print(f"{_RED}{_BOLD}Error:{_RESET} {_RED}{msg}{_RESET}", file=sys.stderr)
+    else:
+        print(f"Error: {msg}", file=sys.stderr)
+
 
 def _setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.WARNING
@@ -214,7 +228,7 @@ def _shortcut_train(agent: AIAgent, args: argparse.Namespace) -> int:
     data_dir = args.data_dir
     err = _validate_dir(data_dir, "Dataset directory")
     if err:
-        print(f"Error: {err}", file=sys.stderr)
+        _print_error(err)
         return 1
 
     # Direct tool call — skip LLM
@@ -234,7 +248,7 @@ def _shortcut_train(agent: AIAgent, args: argparse.Namespace) -> int:
             _rich_print_json(data)
             return 0
         else:
-            print(f"Error: {data.get('error', 'Unknown error')}", file=sys.stderr)
+            _print_error(data.get("error", "Unknown error"))
             return 1
     except json.JSONDecodeError:
         print(result)
@@ -245,7 +259,7 @@ def _shortcut_eval(agent: AIAgent, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent eval <model_path> [--data data.yaml]"""
     err = _validate_file(args.model_path, "Model file")
     if err:
-        print(f"Error: {err}", file=sys.stderr)
+        _print_error(err)
         return 1
 
     tool_args: dict[str, Any] = {"model_path": str(Path(args.model_path).expanduser().resolve())}
@@ -259,7 +273,7 @@ def _shortcut_eval(agent: AIAgent, args: argparse.Namespace) -> int:
             _rich_print_json(data)
             return 0
         else:
-            print(f"Error: {data.get('error', 'Unknown error')}", file=sys.stderr)
+            _print_error(data.get("error", "Unknown error"))
             return 1
     except json.JSONDecodeError:
         print(result)
@@ -299,7 +313,7 @@ def _shortcut_clone(agent: AIAgent, args: argparse.Namespace) -> int:
     try:
         data = json.loads(result)
         if not data.get("success"):
-            print(f"Error: {data.get('error', 'Unknown error')}", file=sys.stderr)
+            _print_error(data.get("error", "Unknown error"))
             return 1
 
         _rich_print_json(data)
@@ -322,11 +336,11 @@ def _shortcut_infer(agent: AIAgent, args: argparse.Namespace) -> int:
     """Shortcut: pico-agent infer <model_path> <image_path>"""
     err = _validate_file(args.model_path, "Model file")
     if err:
-        print(f"Error: {err}", file=sys.stderr)
+        _print_error(err)
         return 1
     err = _validate_file(args.image_path, "Image file")
     if err:
-        print(f"Error: {err}", file=sys.stderr)
+        _print_error(err)
         return 1
 
     prompt = f"Run inference with model {args.model_path} on image {args.image_path}. Show the results."
@@ -345,7 +359,7 @@ def _single_shot(agent: AIAgent, message: str) -> int:
     """
     message = message.strip()
     if not message:
-        print("Error: empty message. Provide a question or command.", file=sys.stderr)
+        _print_error("empty message. Provide a question or command.")
         return 1
     try:
         response = agent.run(message)
@@ -361,14 +375,13 @@ def _single_shot(agent: AIAgent, message: str) -> int:
         # for a CLI entry point — we never want raw tracebacks.
         msg = str(e)
         if "Missing" in msg and ("credentials" in msg.lower() or "api key" in msg.lower()):
-            print(
-                "Error: No API key configured. Set OPENAI_API_KEY or PICO_API_KEY environment variable,\n"
+            _print_error(
+                "No API key configured. Set OPENAI_API_KEY or PICO_API_KEY environment variable,\n"
                 "       or add api_key to ~/.pico-agent/config.yaml\n\n"
-                "Run `pico-agent --help` for more information.",
-                file=sys.stderr,
+                "Run `pico-agent --help` for more information."
             )
         else:
-            print(f"Error: {e}", file=sys.stderr)
+            _print_error(str(e))
         return 1
 
 
@@ -425,13 +438,15 @@ def _repl(agent: AIAgent) -> int:
 
         # Regular message → run agent
         try:
+            if sys.stderr.isatty():
+                print(f"{_DIM}Thinking...{_RESET}", file=sys.stderr)
             response = agent.run(user_input)
             _rich_print(response)
         except KeyboardInterrupt:
             print("\n[Interrupted]")
         except Exception as e:
             logger.exception("Agent error")
-            print(f"Error: {e}", file=sys.stderr)
+            _print_error(str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +510,7 @@ def main(argv: list[str] | None = None) -> None:
             break
         else:
             if a.startswith("-"):
-                print(f"Error: unknown option: {a}", file=sys.stderr)
+                _print_error(f"unknown option: {a}")
                 _print_help()
                 sys.exit(1)
             positional.append(a)
@@ -507,7 +522,7 @@ def main(argv: list[str] | None = None) -> None:
     if explicit_config and config_path is not None:
         cfg_p = Path(config_path).expanduser().resolve()
         if not cfg_p.exists():
-            print(f"Error: config file not found: {config_path}", file=sys.stderr)
+            _print_error(f"config file not found: {config_path}")
             sys.exit(1)
 
     # --- Route: command vs single-shot vs REPL ---
@@ -530,7 +545,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         config = load_config(config_path, strict=explicit_config)
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        _print_error(str(e))
         sys.exit(1)
 
     # Set up history file
@@ -561,7 +576,7 @@ def main(argv: list[str] | None = None) -> None:
                 _rich_print(response)
             except Exception as e:
                 # Catch LLM provider errors (OpenAIError, APIError, etc.)
-                print(f"Error: {e}", file=sys.stderr)
+                _print_error(str(e))
                 exit_code = 1
         session_store.close()
         sys.exit(exit_code or 0)
