@@ -65,7 +65,7 @@ Agent: [dataset_search] 搜到以下数据集...
 ### 🔧 Level 3: Advanced (Direct Tool Control)
 
 ```
->>> 用 MMDetection 训练 faster-rcnn，数据在 ./data/coco，远程服务器 m5pro
+>>> 用 MMDetection 训练 faster-rcnn，数据在 ./data/coco，远程服务器 gpu-server
 Agent: [dataset_info] 检查数据集
        [mmdet_config] 生成 Faster-RCNN 配置
        [remote_file_sync] 同步数据到远程服务器
