@@ -40,10 +40,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
 ENV_OVERRIDES: dict[str, str] = {
     "OPENAI_API_KEY": "model.api_key",
     "OPENAI_BASE_URL": "model.base_url",
+    "ANTHROPIC_API_KEY": "model.api_key",
+    "ANTHROPIC_BASE_URL": "model.base_url",
     "PICO_API_KEY": "model.api_key",
     "PICO_MODEL": "model.model",
     "PICO_BASE_URL": "model.base_url",
-    "PICO_PROVIDER": "model.provider",
 }
 
 
