@@ -548,6 +548,17 @@ def main(argv: list[str] | None = None) -> None:
         _print_error(str(e))
         sys.exit(1)
 
+    # Set working directory if configured
+    if config.work_dir:
+        import os
+        work = os.path.expanduser(config.work_dir)
+        if os.path.isdir(work):
+            os.chdir(work)
+            logger.info("Working directory: %s", work)
+        else:
+            _print_error(f"work_dir not found: {config.work_dir}")
+            sys.exit(1)
+
     # Set up history file
     history_path = str(CONFIG_DIR / "history")
     config.data["_history_path"] = history_path

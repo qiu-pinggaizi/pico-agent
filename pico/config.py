@@ -170,6 +170,11 @@ class Config:
         """Base directory for pico-agent data (datasets, repos, etc.)."""
         return str(CONFIG_DIR)
 
+    @property
+    def work_dir(self) -> str:
+        """Working directory for commands (default: cwd where pico-agent was launched)."""
+        return self.data.get("work_dir", "")
+
 
 def load_config(config_path: str | Path | None = None, *, strict: bool = False) -> Config:
     """Load configuration from YAML file, with env var overrides.
