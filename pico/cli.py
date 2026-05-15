@@ -121,6 +121,8 @@ def _handle_slash_command(cmd: str, agent: AIAgent) -> str | None:
             "- `/memory` — Show persistent memory\n"
             "- `/memory add <text>` — Add a memory entry\n"
             "- `/memory rm <keyword>` — Remove memory entries\n\n"
+            "**Tools:**\n"
+            "- `/tools` — List available tools\n\n"
             "**Quick Actions:**\n"
             "- Just describe what you want to do! The agent will figure out the tools.\n"
             "  Examples:\n"
@@ -164,6 +166,17 @@ def _handle_slash_command(cmd: str, agent: AIAgent) -> str | None:
         memory_content = agent.memory.load()
         _rich_print_memory(memory_content)
         return None
+
+    if command == "/tools":
+        schemas = agent.tools.get_schemas()
+        if not schemas:
+            return "No tools registered."
+        lines = ["# Available Tools\n"]
+        for s in schemas:
+            name = s.get("name", "?")
+            desc = s.get("description", "No description").split("\n")[0]
+            lines.append(f"- **{name}** — {desc}")
+        return "\n".join(lines)
 
     return None
 
@@ -346,7 +359,16 @@ def _single_shot(agent: AIAgent, message: str) -> int:
         # (OpenAIError, APIError, etc.) that don't inherit from
         # OSError/ValueError/RuntimeError. Broad catch is correct
         # for a CLI entry point — we never want raw tracebacks.
-        print(f"Error: {e}", file=sys.stderr)
+        msg = str(e)
+        if "Missing" in msg and ("credentials" in msg.lower() or "api key" in msg.lower()):
+            print(
+                "Error: No API key configured. Set OPENAI_API_KEY or PICO_API_KEY environment variable,\n"
+                "       or add api_key to ~/.pico-agent/config.yaml\n\n"
+                "Run `pico-agent --help` for more information.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"Error: {e}", file=sys.stderr)
         return 1
 
 
@@ -366,7 +388,11 @@ def _repl(agent: AIAgent) -> int:
     except ImportError:
         session = None
 
-    print("Pico Agent — type /help for commands, Ctrl+D to exit\n")
+    from pico import __version__
+    print(
+        f"🤖 Pico Agent v{__version__} — AI-powered coding & detection assistant\n"
+        "   Ask me anything, or type /help for commands. Ctrl+D to exit.\n"
+    )
 
     while True:
         try:

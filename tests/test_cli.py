@@ -32,6 +32,22 @@ class TestHelpFlags:
         assert "USAGE" in out
 
 
+class TestHelpRouting:
+    """Test that --help before a subcommand shows global help, not subcommand help."""
+
+    def test_help_before_train_shows_global_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """main(['--help', 'train']) should show global help, NOT train-specific help."""
+        with pytest.raises(SystemExit) as exc_info:
+            main(["--help", "train"])
+        assert exc_info.value.code == 0
+        out = capsys.readouterr().out
+        # Global help has "USAGE" and "SHORTCUT COMMANDS"
+        assert "USAGE" in out
+        assert "SHORTCUT COMMANDS" in out
+        # Should NOT contain train-specific help text like "data_dir" (argparse-style)
+        assert "data_dir" not in out
+
+
 class TestSubcommandHelp:
     """Test --help for each subcommand."""
 
@@ -78,6 +94,26 @@ class TestSubcommandHelp:
         assert "model_path" in out
 
 
+class TestUnknownFlags:
+    """Test that unknown flags are rejected with a clear error."""
+
+    def test_unknown_long_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """main(['--unknown-flag']) should exit 1 with 'unknown option' in stderr."""
+        with pytest.raises(SystemExit) as exc_info:
+            main(["--unknown-flag"])
+        assert exc_info.value.code == 1
+        err = capsys.readouterr().err
+        assert "unknown option" in err.lower()
+
+    def test_unknown_short_flag_after_verbose(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """main(['--verbose', '-x']) should exit 1 — '-x' is not a known flag."""
+        with pytest.raises(SystemExit) as exc_info:
+            main(["--verbose", "-x"])
+        assert exc_info.value.code == 1
+        err = capsys.readouterr().err
+        assert "unknown option" in err.lower()
+
+
 class TestErrorCases:
     """Test error paths that should exit non-zero."""
 
@@ -101,6 +137,41 @@ class TestErrorCases:
         """main(['train']) with no args should error."""
         with pytest.raises((SystemExit, SystemError)):
             main(["train"])
+
+
+class TestOpenAIErrorCatch:
+    """Test that LLM errors (OpenAIError etc.) are caught cleanly in _single_shot."""
+
+    def test_openai_error_caught_in_single_shot(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """When the LLM raises an OpenAIError, _single_shot should return 1
+        and print a user-friendly error (not a raw traceback)."""
+        from pico.cli import _single_shot
+
+        mock_agent = MagicMock()
+        mock_agent.run.side_effect = Exception("Missing API key or credentials")
+
+        code = _single_shot(mock_agent, "hello")
+        assert code == 1
+        err = capsys.readouterr().err
+        assert "Error" in err
+
+    def test_openai_auth_error_shows_friendly_message(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """When agent.run raises an error about missing credentials,
+        the CLI should show a friendly API-key message."""
+        from pico.cli import _single_shot
+
+        mock_agent = MagicMock()
+        # Simulate what openai raises when credentials are missing
+        mock_agent.run.side_effect = Exception("Missing API key or credentials")
+
+        code = _single_shot(mock_agent, "hello")
+        assert code == 1
+        err = capsys.readouterr().err
+        # Should show friendly message with configuration instructions
+        assert "No API key configured" in err
+        assert "OPENAI_API_KEY" in err
+        assert "PICO_API_KEY" in err
+        assert "~/.pico-agent/config.yaml" in err
 
 
 class TestVerboseFlag:
