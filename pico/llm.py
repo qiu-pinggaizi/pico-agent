@@ -147,9 +147,10 @@ class OpenAIProvider(LLMProvider):
 class AnthropicProvider(LLMProvider):
     """Anthropic Claude API provider."""
 
-    def __init__(self, model: str, api_key: str, max_tokens: int = 8192) -> None:
+    def __init__(self, model: str, api_key: str, base_url: str = "", max_tokens: int = 4096) -> None:
         self.model = model
         self.api_key = api_key
+        self.base_url = base_url
         self.max_tokens = max_tokens
 
     def _convert_tools_for_anthropic(
@@ -230,7 +231,10 @@ class AnthropicProvider(LLMProvider):
     ) -> LLMResponse:
         import anthropic
 
-        client = anthropic.Anthropic(api_key=self.api_key)
+        client = anthropic.Anthropic(
+            api_key=self.api_key,
+            base_url=self.base_url if self.base_url else None,
+        )
 
         # Build system prompt from separate param and messages
         all_system_parts: list[str] = []
@@ -299,6 +303,7 @@ class AnthropicProvider(LLMProvider):
                     name=block.name,
                     arguments=block.input if isinstance(block.input, dict) else {},
                 ))
+            # Other block types (thinking, etc.) are silently skipped
 
         usage = {}
         if response.usage:
@@ -337,7 +342,8 @@ def create_provider(config: Any) -> LLMProvider:
         return AnthropicProvider(
             model=config.model,
             api_key=config.api_key,
-            max_tokens=config.max_tokens,
+            base_url=config.base_url,
+            max_tokens=4096,  # API output limit, not context budget
         )
     else:
         raise ValueError(f"Unknown LLM provider: {provider_name}")

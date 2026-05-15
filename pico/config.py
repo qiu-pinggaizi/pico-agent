@@ -36,7 +36,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 # Environment variable mapping
+# PICO_* vars always take precedence (applied last if both exist)
 ENV_OVERRIDES: dict[str, str] = {
+    "OPENAI_API_KEY": "model.api_key",
+    "OPENAI_BASE_URL": "model.base_url",
     "PICO_API_KEY": "model.api_key",
     "PICO_MODEL": "model.model",
     "PICO_BASE_URL": "model.base_url",
