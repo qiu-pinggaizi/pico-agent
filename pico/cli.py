@@ -341,7 +341,11 @@ def _single_shot(agent: AIAgent, message: str) -> int:
     except KeyboardInterrupt:
         print("\nCancelled.")
         return 130
-    except (OSError, ValueError, RuntimeError) as e:
+    except Exception as e:
+        # Catch all errors including LLM provider exceptions
+        # (OpenAIError, APIError, etc.) that don't inherit from
+        # OSError/ValueError/RuntimeError. Broad catch is correct
+        # for a CLI entry point — we never want raw tracebacks.
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
@@ -399,7 +403,7 @@ def _repl(agent: AIAgent) -> int:
             _rich_print(response)
         except KeyboardInterrupt:
             print("\n[Interrupted]")
-        except (OSError, ValueError, RuntimeError) as e:
+        except Exception as e:
             logger.exception("Agent error")
             print(f"Error: {e}", file=sys.stderr)
 
@@ -440,13 +444,7 @@ def main(argv: list[str] | None = None) -> None:
     while i < len(argv):
         a = argv[i]
         if a in ("--help", "-h"):
-            # If a command follows, let the command parser handle --help
-            # (e.g. `pico-agent train --help` → show train help, not global help)
-            rest_after = argv[i + 1:]
             if positional and positional[0] in KNOWN_COMMANDS:
-                positional.append(a)
-                i += 1
-            elif rest_after and rest_after[0] in KNOWN_COMMANDS:
                 positional.append(a)
                 i += 1
             else:
@@ -467,9 +465,15 @@ def main(argv: list[str] | None = None) -> None:
         elif a.startswith("--config="):
             config_path = a.split("=", 1)[1]; explicit_config = True; i += 1
         elif a == "--":
-            positional.extend(argv[i + 1:]); break
+            positional.extend(argv[i + 1:])
+            break
         else:
-            positional.append(a); i += 1
+            if a.startswith("-"):
+                print(f"Error: unknown option: {a}", file=sys.stderr)
+                _print_help()
+                sys.exit(1)
+            positional.append(a)
+            i += 1
 
     _setup_logging(verbose)
 
@@ -529,7 +533,8 @@ def main(argv: list[str] | None = None) -> None:
             try:
                 response = agent.run(piped_input)
                 _rich_print(response)
-            except (OSError, ValueError, RuntimeError) as e:
+            except Exception as e:
+                # Catch LLM provider errors (OpenAIError, APIError, etc.)
                 print(f"Error: {e}", file=sys.stderr)
                 exit_code = 1
         session_store.close()
