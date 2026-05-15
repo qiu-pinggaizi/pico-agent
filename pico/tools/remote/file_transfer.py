@@ -32,6 +32,8 @@ def file_upload_handler(args: dict[str, Any]) -> str:
             "message": f"Uploaded {local_path} -> {remote_path}",
             "size": os.path.getsize(local_path),
         })
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
         logger.exception("file_upload failed")
         return json.dumps({"success": False, "error": str(e)})
@@ -56,6 +58,8 @@ def file_download_handler(args: dict[str, Any]) -> str:
             "message": f"Downloaded {remote_path} -> {local_path}",
             "size": os.path.getsize(local_path) if os.path.isfile(local_path) else 0,
         })
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
         logger.exception("file_download failed")
         return json.dumps({"success": False, "error": str(e)})
@@ -93,6 +97,8 @@ def file_sync_handler(args: dict[str, Any]) -> str:
             "files_transferred": count,
             "direction": direction,
         })
+    except PermissionError as e:
+        return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
         logger.exception("file_sync failed")
         return json.dumps({"success": False, "error": str(e)})

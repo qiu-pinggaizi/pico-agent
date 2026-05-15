@@ -58,6 +58,7 @@ def get_ssh_client(server_name: str) -> "SSHClient":
         key_path=srv_cfg.get("key_path"),
         password=srv_cfg.get("password"),
         conda_env=srv_cfg.get("conda_env"),
+        workspace=srv_cfg.get("workspace"),
     )
     _ssh_clients[server_name] = client
     return client
@@ -78,6 +79,7 @@ class SSHClient:
         key_path: Optional[str] = None,
         password: Optional[str] = None,
         conda_env: Optional[str] = None,
+        workspace: Optional[str] = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -85,6 +87,7 @@ class SSHClient:
         self.key_path = key_path
         self.password = password
         self.conda_env = conda_env
+        self.workspace = workspace.rstrip("/") if workspace else None
         self._client: Optional[paramiko.SSHClient] = None
         self._sftp: Optional[paramiko.SFTPClient] = None
 
@@ -119,6 +122,18 @@ class SSHClient:
             self._close()
             return False
         return True
+
+    def check_workspace_path(self, path: str) -> None:
+        """Raise PermissionError if *path* escapes the workspace sandbox."""
+        if not self.workspace:
+            return
+        # Normalize and check
+        norm = os.path.normpath(path)
+        if not norm.startswith(self.workspace):
+            raise PermissionError(
+                f"Access denied: '{path}' is outside workspace '{self.workspace}'. "
+                f"All remote paths must be within the workspace."
+            )
 
     def _close(self) -> None:
         if self._sftp:
@@ -197,6 +212,7 @@ class SSHClient:
 
     def upload(self, local_path: str, remote_path: str) -> None:
         """Upload a single file."""
+        self.check_workspace_path(remote_path)
         self._connect()
         sftp = self._get_sftp()
         # ensure remote directory exists
@@ -207,6 +223,7 @@ class SSHClient:
 
     def download(self, remote_path: str, local_path: str) -> None:
         """Download a single file."""
+        self.check_workspace_path(remote_path)
         self._connect()
         sftp = self._get_sftp()
         local_dir = str(Path(local_path).parent)
@@ -216,6 +233,7 @@ class SSHClient:
 
     def upload_dir(self, local_dir: str, remote_dir: str, exclude: list[str] | None = None) -> int:
         """Recursively upload *local_dir* to *remote_dir*. Returns file count."""
+        self.check_workspace_path(remote_dir)
         import fnmatch
 
         exclude = exclude or []
@@ -244,6 +262,7 @@ class SSHClient:
 
     def download_dir(self, remote_dir: str, local_dir: str, exclude: list[str] | None = None) -> int:
         """Recursively download *remote_dir* to *local_dir*. Returns file count."""
+        self.check_workspace_path(remote_dir)
 
         exclude = exclude or []
         sftp = self._get_sftp()
