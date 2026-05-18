@@ -141,7 +141,6 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,
   <div class="main">
     <div class="tabs">
       <div class="tab active" data-tab="overview">📊 Overview</div>
-      <div class="tab" data-tab="charts">📈 Charts</div>
       <div class="tab" data-tab="config">⚙️ Config</div>
       <div class="tab" data-tab="images">🖼️ Results</div>
       <div class="tab" data-tab="tensorboard">📉 TensorBoard</div>
@@ -161,17 +160,6 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,
         <div class="ov-grid" id="ov-cards"></div>
         <div class="chart-row"><div class="chart-box"><h3>📉 Loss 曲线</h3><canvas id="loss-mini" height="180"></canvas></div>
         <div class="chart-box"><h3>📈 mAP 曲线</h3><canvas id="map-mini" height="180"></canvas></div></div>
-      </div>
-    </div>
-
-    <!-- Charts -->
-    <div class="panel hidden" id="panel-charts">
-      <div class="empty" id="ch-empty"><div class="icon">📈</div><h2>选择一个训练任务</h2></div>
-      <div id="ch-content" style="display:none">
-        <div class="chart-row"><div class="chart-box chart-full"><h3>📉 Training & Validation Loss</h3><canvas id="loss-chart" height="220"></canvas></div></div>
-        <div class="chart-row"><div class="chart-box"><h3>📈 mAP Metrics</h3><canvas id="map-chart" height="200"></canvas></div>
-        <div class="chart-box"><h3>🎯 Precision & Recall</h3><canvas id="pr-chart" height="200"></canvas></div></div>
-        <div class="chart-row"><div class="chart-box chart-full"><h3>📚 Learning Rate</h3><canvas id="lr-chart" height="160"></canvas></div></div>
       </div>
     </div>
 
@@ -326,7 +314,6 @@ async function selectRunByIdx(idx) {
     currentRun = await api('/api/runs/' + encodeURIComponent(r.id));
     renderRunList(runs);
     renderOverview(currentRun);
-    renderCharts(currentRun);
     renderConfig(currentRun);
     renderImages(currentRun);
     switchTab('overview');
@@ -384,44 +371,6 @@ function renderMiniCharts(run) {
     {label: 'mAP50', data: map50, color: '#3fb950'},
     {label: 'mAP50-95', data: map5095, color: '#58a6ff'},
   ]);
-}
-
-// ── Full Charts ──
-function renderCharts(run) {
-  var data = run.results_data || [];
-  if (!data.length) {
-    document.getElementById('ch-empty').style.display = 'flex';
-    document.getElementById('ch-content').style.display = 'none';
-    return;
-  }
-  document.getElementById('ch-empty').style.display = 'none';
-  document.getElementById('ch-content').style.display = 'block';
-  var epochs = data.map(function(_, i) { return i + 1; });
-  var lossKeys = ['train/box_loss','train/cls_loss','train/dfl_loss'].filter(function(k) { return k in data[0]; });
-  var valLossKeys = ['val/box_loss','val/cls_loss','val/dfl_loss'].filter(function(k) { return k in data[0]; });
-  var colors = {box: '#f85149', cls: '#d29922', dfl: '#bc8cff'};
-
-  makeChart('loss-chart', epochs,
-    lossKeys.map(function(k) {
-      var c = k.split('/')[1].split('_')[0];
-      return {label: k.replace('train/',''), data: data.map(function(r) { return r[k] || 0; }), color: colors[c] || '#aaa'};
-    }).concat(valLossKeys.map(function(k) {
-      var c = k.split('/')[1].split('_')[0];
-      return {label: k.replace('val/','val_'), data: data.map(function(r) { return r[k] || 0; }), color: (colors[c] || '#aaa') + '80', dash: [5,5]};
-    })), true
-  );
-  makeChart('map-chart', epochs, [
-    {label: 'mAP50', data: data.map(function(r) { return r['metrics/mAP50(B)'] || 0; }), color: '#3fb950'},
-    {label: 'mAP50-95', data: data.map(function(r) { return r['metrics/mAP50-95(B)'] || 0; }), color: '#58a6ff'},
-  ], true);
-  makeChart('pr-chart', epochs, [
-    {label: 'Precision', data: data.map(function(r) { return r['metrics/precision(B)'] || 0; }), color: '#39d2c0'},
-    {label: 'Recall', data: data.map(function(r) { return r['metrics/recall(B)'] || 0; }), color: '#f778ba'},
-  ], true);
-  var lrKeys = ['lr/pg0','lr/pg1','lr/pg2'].filter(function(k) { return k in data[0]; });
-  makeChart('lr-chart', epochs, lrKeys.map(function(k, i) {
-    return {label: k, data: data.map(function(r) { return r[k] || 0; }), color: ['#58a6ff','#3fb950','#d29922'][i]};
-  }), true);
 }
 
 function makeChart(canvasId, labels, series, detailed) {
@@ -654,8 +603,6 @@ async function deleteRun() {
       // Clear panels
       document.getElementById('ov-empty').style.display = 'flex';
       document.getElementById('ov-content').style.display = 'none';
-      document.getElementById('ch-empty').style.display = 'flex';
-      document.getElementById('ch-content').style.display = 'none';
       document.getElementById('cfg-empty').style.display = 'flex';
       document.getElementById('cfg-content').style.display = 'none';
       document.getElementById('img-empty').style.display = 'flex';
