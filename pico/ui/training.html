@@ -222,8 +222,14 @@ async function api(path, opts) {
 
 // ── Init ──
 async function init() {
-  runs = await api('/api/runs');
-  renderRunList(runs);
+  try {
+    runs = await api('/api/runs');
+    renderRunList(runs);
+  } catch (e) {
+    runs = [];
+    renderRunList([]);
+    console.error('Failed to load runs:', e);
+  }
   checkTB();
   startAutoRefresh();
   bindEvents();
@@ -491,8 +497,12 @@ function renderImages(run) {
 
 // ── TensorBoard ──
 async function checkTB() {
-  var info = await api('/api/tensorboard/status');
-  updateTBUI(info);
+  try {
+    var info = await api('/api/tensorboard/status');
+    updateTBUI(info);
+  } catch (e) {
+    updateTBUI({available: false, running: false});
+  }
 }
 
 function updateTBUI(info) {
@@ -500,6 +510,20 @@ function updateTBUI(info) {
   var startBtn = document.getElementById('tb-start-btn');
   var stopBtn = document.getElementById('tb-stop-btn');
   var link = document.getElementById('tb-link');
+  var placeholder = document.getElementById('tb-placeholder');
+  // tensorboard not installed
+  if (info.available === false) {
+    status.className = 'status off';
+    status.textContent = '未安装';
+    startBtn.style.display = 'none';
+    stopBtn.style.display = 'none';
+    link.style.display = 'none';
+    placeholder.querySelector('.icon').textContent = '📦';
+    placeholder.querySelector('h2').textContent = 'TensorBoard 未安装';
+    placeholder.querySelector('p').innerHTML = '请先安装: <code style="background:var(--bg-3);padding:2px 6px;border-radius:4px">pip install tensorboard</code>';
+    placeholder.style.display = 'flex';
+    return;
+  }
   if (info.running) {
     status.className = 'status on';
     status.textContent = '运行中 (port ' + info.port + ')';
@@ -513,6 +537,10 @@ function updateTBUI(info) {
     startBtn.style.display = '';
     stopBtn.style.display = 'none';
     link.style.display = 'none';
+    // reset placeholder to default
+    placeholder.querySelector('.icon').textContent = '📉';
+    placeholder.querySelector('h2').textContent = 'TensorBoard';
+    placeholder.querySelector('p').textContent = '选择一个训练任务后点击 Start 启动 TensorBoard';
   }
 }
 
@@ -524,11 +552,18 @@ async function startTB() {
     body: JSON.stringify({logdir: logdir, port: 6006})
   });
   if (result.success) {
-    updateTBUI({running: true, port: result.port, url: result.url});
+    updateTBUI({running: true, port: result.port, url: result.url, available: true});
     document.getElementById('tb-frame').src = result.url;
     document.getElementById('tb-frame').style.display = 'block';
     document.getElementById('tb-placeholder').style.display = 'none';
-  } else { alert('启动失败: ' + result.error); }
+  } else {
+    // Show friendly error in placeholder instead of alert
+    var ph = document.getElementById('tb-placeholder');
+    ph.querySelector('.icon').textContent = '⚠️';
+    ph.querySelector('h2').textContent = '启动失败';
+    ph.querySelector('p').textContent = result.error || '未知错误';
+    ph.style.display = 'flex';
+  }
 }
 
 async function stopTB() {

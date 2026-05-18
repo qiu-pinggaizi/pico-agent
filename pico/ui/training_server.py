@@ -440,10 +440,17 @@ _tb_port: int = 6006
 _tb_logdir: str = ""
 
 
+def _tb_is_available() -> bool:
+    """Check if tensorboard binary is accessible."""
+    import shutil
+    return shutil.which("tensorboard") is not None
+
+
 def _get_tensorboard_info() -> dict[str, Any]:
     global _tb_process, _tb_port, _tb_logdir
     running = _tb_process is not None and _tb_process.poll() is None
     return {
+        "available": _tb_is_available(),
         "running": running,
         "port": _tb_port,
         "logdir": _tb_logdir,
@@ -541,3 +548,15 @@ def start_monitor(
     finally:
         _stop_tensorboard()
         server.server_close()
+
+
+if __name__ == "__main__":
+    import argparse as _ap
+
+    _p = _ap.ArgumentParser(description="Pico Training Monitor")
+    _p.add_argument("--port", "-p", type=int, default=8766)
+    _p.add_argument("--scan", nargs="*", help="Directories to scan")
+    _p.add_argument("--host", default="127.0.0.1")
+    _p.add_argument("--no-open", action="store_true")
+    _a = _p.parse_args()
+    start_monitor(host=_a.host, port=_a.port, scan_roots=_a.scan or None, open_browser=not _a.no_open)

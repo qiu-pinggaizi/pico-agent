@@ -552,11 +552,15 @@ def main(argv: list[str] | None = None) -> None:
             positional.extend(argv[i + 1:])
             break
         else:
-            if a.startswith("-"):
+            if a.startswith("-") and positional and positional[0] in KNOWN_COMMANDS:
+                # Defer to subcommand parser (e.g. --port, --scan, --model)
+                positional.append(a)
+            elif a.startswith("-"):
                 _print_error(f"unknown option: {a}")
                 _print_help()
                 sys.exit(1)
-            positional.append(a)
+            else:
+                positional.append(a)
             i += 1
 
     _setup_logging(verbose)
