@@ -515,7 +515,15 @@ def start_monitor(
     roots = scan_roots or _DEFAULT_SCAN_ROOTS
 
     _MonitorHandler.scan_roots = roots
-    server = HTTPServer((host, port), _MonitorHandler)
+    HTTPServer.allow_reuse_address = True
+    try:
+        server = HTTPServer((host, port), _MonitorHandler)
+    except OSError as e:
+        if "Address already in use" in str(e) or e.errno == 98:
+            print(f"❌ Port {port} is already in use.")
+            print(f"   Another instance may be running, or try: pico-agent monitor --port {port + 1}")
+            return
+        raise
 
     url = f"http://{host}:{port}"
     print(f"🏋️ Pico Training Monitor — {url}")

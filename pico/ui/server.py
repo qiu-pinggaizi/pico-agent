@@ -223,7 +223,16 @@ def start_ui(
     resolved_db = Path(db_path) if db_path else DEFAULT_DB_PATH
     _APIHandler.db_path = str(resolved_db)
 
-    server = HTTPServer((host, port), _APIHandler)
+    HTTPServer.allow_reuse_address = True
+    try:
+        server = HTTPServer((host, port), _APIHandler)
+    except OSError as e:
+        if "Address already in use" in str(e) or e.errno == 98:
+            print(f"❌ Port {port} is already in use.")
+            print(f"   Another instance may be running, or try: pico-agent ui --port {port + 1}")
+            return
+        raise
+
     url = f"http://{host}:{port}"
     print(f"🤖 Pico Agent Dashboard — {url}")
     print(f"   DB: {resolved_db}")
