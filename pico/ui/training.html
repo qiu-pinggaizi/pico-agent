@@ -476,7 +476,16 @@ function renderImages(run) {
   // Use API endpoint for serving images
   var baseUrl = '/api/runs/' + encodeURIComponent(run.id) + '/image/';
   grid.innerHTML = run.result_images.map(function(name) {
-    return '<div class="img-card"><img src="' + esc(baseUrl + encodeURIComponent(name)) + '" onerror="this.style.display=\'none\'" alt="' + esc(name) + '"><div class="caption">' + esc(name) + '</div></div>';
+    var imgSrc = esc(baseUrl + encodeURIComponent(name));
+    return '<div class="img-card">' +
+      '<div class="img-wrap" style="position:relative;min-height:120px;background:var(--bg-3);display:flex;align-items:center;justify-content:center">' +
+      '<img src="' + imgSrc + '" alt="' + esc(name) + '" style="max-width:100%;display:block" ' +
+      'onload="this.parentNode.querySelector(\'.img-err\')&&(this.parentNode.querySelector(\'.img-err\').style.display=\'none\')" ' +
+      'onerror="this.style.display=\'none\';this.parentNode.querySelector(\'.img-err\').style.display=\'flex\'">' +
+      '<div class="img-err" style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;color:var(--t3);gap:6px;font-size:12px">' +
+      '<span style="font-size:24px;opacity:.5">🖼️</span><span>图片加载失败</span></div>' +
+      '</div>' +
+      '<div class="caption">' + esc(name) + '</div></div>';
   }).join('');
 }
 
