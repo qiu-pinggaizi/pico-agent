@@ -290,6 +290,18 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             self._api_tensorboard_stop()
         elif path == "/api/scan/roots":
             self._api_update_roots()
+        elif re.match(r"^/api/runs/(.+)/open$", path):
+            self._api_open_run_dir("/".join(path.split("/")[3:-1]))
+        else:
+            self._json_response({"error": "Not found"}, 404)
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+
+        m = re.match(r"^/api/runs/(.+)$", path)
+        if m:
+            self._api_delete_run(m.group(1))
         else:
             self._json_response({"error": "Not found"}, 404)
 
@@ -370,6 +382,53 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             global _cache_ts
             _cache_ts = 0
         self._json_response({"success": True, "roots": self.scan_roots})
+
+    def _api_delete_run(self, run_id_encoded: str) -> None:
+        """Delete a training run directory and remove it from cache."""
+        from urllib.parse import unquote
+        import shutil
+        decoded = unquote(run_id_encoded)
+        # Security: verify the path exists and looks like a training run
+        target = Path(decoded)
+        if not target.exists() or not target.is_dir():
+            self._json_response({"error": "Run directory not found"}, 404)
+            return
+        # Must contain results.csv to be a valid run
+        if not (target / "results.csv").exists():
+            self._json_response({"error": "Not a valid training run directory"}, 400)
+            return
+        try:
+            shutil.rmtree(str(target))
+            # Remove from cache
+            global _run_cache, _cache_ts
+            _run_cache = [r for r in _run_cache if r.get("id") != decoded and r.get("path") != decoded]
+            _cache_ts = 0  # force rescan on next request
+            self._json_response({"success": True, "deleted": decoded})
+        except Exception as e:
+            self._json_response({"error": f"Failed to delete: {e}"}, 500)
+
+    def _api_open_run_dir(self, run_id_encoded: str) -> None:
+        """Open run directory in system file manager."""
+        from urllib.parse import unquote
+        decoded = unquote(run_id_encoded)
+        target = Path(decoded)
+        if not target.exists() or not target.is_dir():
+            self._json_response({"error": "Directory not found"}, 404)
+            return
+        try:
+            import shutil
+            if shutil.which("xdg-open"):
+                subprocess.Popen(["xdg-open", str(target)],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self._json_response({"success": True, "path": str(target)})
+            elif shutil.which("open"):  # macOS
+                subprocess.Popen(["open", str(target)],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self._json_response({"success": True, "path": str(target)})
+            else:
+                self._json_response({"success": False, "error": "No file manager found (xdg-open/open)"})
+        except Exception as e:
+            self._json_response({"success": False, "error": str(e)})
 
     def _api_serve_image(self, run_id: str, filename: str) -> None:
         """Serve result images (confusion_matrix.png, etc.) from run directory."""

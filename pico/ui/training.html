@@ -98,6 +98,12 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,
 .wt-table th { color:var(--t2); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
 .wt-table tr:hover td { background:var(--bg-hover); }
 
+/* ── Run path bar ── */
+.path-bar { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r); padding:10px 14px; margin-bottom:16px; display:flex; align-items:center; gap:10px; font-size:12px; }
+.path-bar .path-label { color:var(--t2); white-space:nowrap; }
+.path-bar .path-value { color:var(--cyan); font-family:monospace; word-break:break-all; flex:1; user-select:all; }
+.path-bar .btn { flex-shrink:0; }
+
 /* ── Result images ── */
 .img-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:16px; }
 .img-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r); overflow:hidden; }
@@ -145,6 +151,13 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,
     <div class="panel" id="panel-overview">
       <div class="empty" id="ov-empty"><div class="icon">📊</div><h2>选择一个训练任务</h2><p>从左侧列表选择一个训练任务查看详情</p></div>
       <div id="ov-content" style="display:none">
+        <div class="path-bar">
+          <span class="path-label">📁 实验目录:</span>
+          <span class="path-value" id="run-path"></span>
+          <button class="btn" id="btn-copy-path" title="复制路径">📋 复制</button>
+          <button class="btn" id="btn-open-dir" title="在文件管理器中打开">📂 打开目录</button>
+          <button class="btn danger" id="btn-delete-run" title="删除此实验记录及文件">🗑️ 删除</button>
+        </div>
         <div class="ov-grid" id="ov-cards"></div>
         <div class="chart-row"><div class="chart-box"><h3>📉 Loss 曲线</h3><canvas id="loss-mini" height="180"></canvas></div>
         <div class="chart-box"><h3>📈 mAP 曲线</h3><canvas id="map-mini" height="180"></canvas></div></div>
@@ -240,6 +253,9 @@ function bindEvents() {
   document.getElementById('run-filter').addEventListener('input', function() { renderRunList(runs); });
   document.getElementById('tb-start-btn').addEventListener('click', startTB);
   document.getElementById('tb-stop-btn').addEventListener('click', stopTB);
+  document.getElementById('btn-copy-path').addEventListener('click', copyPath);
+  document.getElementById('btn-open-dir').addEventListener('click', openDir);
+  document.getElementById('btn-delete-run').addEventListener('click', deleteRun);
 
   // Tab clicks
   document.querySelectorAll('.tab').forEach(function(t) {
@@ -323,6 +339,7 @@ async function selectRunByIdx(idx) {
 function renderOverview(run) {
   document.getElementById('ov-empty').style.display = 'none';
   document.getElementById('ov-content').style.display = 'block';
+  document.getElementById('run-path').textContent = run.path || run.id;
   var m = run.metrics || {};
   var cards = document.getElementById('ov-cards');
   var epoch = m.epoch != null ? Math.round(m.epoch) : run.epochs_logged;
@@ -580,6 +597,79 @@ async function rescan() {
   await api('/api/scan');
   runs = await api('/api/runs');
   renderRunList(runs);
+}
+
+// ── Copy path ──
+function copyPath() {
+  if (!currentRun) return;
+  var path = currentRun.path || currentRun.id;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(path).then(function() {
+      var btn = document.getElementById('btn-copy-path');
+      btn.textContent = '✅ 已复制';
+      setTimeout(function() { btn.textContent = '📋 复制'; }, 1500);
+    });
+  } else {
+    // Fallback
+    var ta = document.createElement('textarea');
+    ta.value = path;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    var btn = document.getElementById('btn-copy-path');
+    btn.textContent = '✅ 已复制';
+    setTimeout(function() { btn.textContent = '📋 复制'; }, 1500);
+  }
+}
+
+// ── Open dir (via API trigger) ──
+function openDir() {
+  if (!currentRun) return;
+  var path = currentRun.path || currentRun.id;
+  // Try xdg-open via a helper API endpoint — fallback: just copy path
+  fetch(API + '/api/runs/' + encodeURIComponent(currentRun.id) + '/open', {method: 'POST'}).then(function(r) {
+    return r.json();
+  }).then(function(d) {
+    if (!d.success) {
+      // Fallback: copy path and notify
+      copyPath();
+      alert('已复制目录路径到剪贴板，请手动打开:\n' + path);
+    }
+  }).catch(function() {
+    copyPath();
+    alert('已复制目录路径到剪贴板，请手动打开:\n' + path);
+  });
+}
+
+// ── Delete run ──
+async function deleteRun() {
+  if (!currentRun) return;
+  var name = currentRun.name || currentRun.path;
+  if (!confirm('确定要删除实验「' + name + '」吗？\n\n此操作将删除整个目录，无法恢复！\n\n' + (currentRun.path || currentRun.id))) return;
+  try {
+    var result = await api('/api/runs/' + encodeURIComponent(currentRun.id), {method: 'DELETE'});
+    if (result.success) {
+      currentRun = null;
+      // Clear panels
+      document.getElementById('ov-empty').style.display = 'flex';
+      document.getElementById('ov-content').style.display = 'none';
+      document.getElementById('ch-empty').style.display = 'flex';
+      document.getElementById('ch-content').style.display = 'none';
+      document.getElementById('cfg-empty').style.display = 'flex';
+      document.getElementById('cfg-content').style.display = 'none';
+      document.getElementById('img-empty').style.display = 'flex';
+      document.getElementById('img-grid').style.display = 'none';
+      // Refresh list
+      runs = await api('/api/runs');
+      renderRunList(runs);
+      switchTab('overview');
+    } else {
+      alert('删除失败: ' + (result.error || '未知错误'));
+    }
+  } catch(e) {
+    alert('删除失败: ' + e.message);
+  }
 }
 
 // ── Tab switch ──
