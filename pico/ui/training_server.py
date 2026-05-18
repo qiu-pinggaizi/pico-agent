@@ -214,14 +214,22 @@ def _inspect_run_dir(run_dir: Path) -> dict[str, Any] | None:
     info["has_tensorboard"] = len(events) > 0
     info["tensorboard_logdir"] = str(run_dir.resolve()) if events else ""
 
-    # Check for result images
+    # Check for result images — all images YOLO training typically produces
+    _RESULT_IMAGE_NAMES = (
+        "confusion_matrix.png", "confusion_matrix_normalized.png",
+        "F1_curve.png", "PR_curve.png", "P_curve.png", "R_curve.png",
+        "results.png", "labels.jpg",
+    )
     images = []
-    for name in ("confusion_matrix.png", "confusion_matrix_normalized.png",
-                 "F1_curve.png", "PR_curve.png", "P_curve.png", "R_curve.png",
-                 "results.png"):
-        img = run_dir / name
-        if img.exists():
+    for name in _RESULT_IMAGE_NAMES:
+        if (run_dir / name).exists():
             images.append(name)
+    # Also pick up train_batch*.jpg and val_batch*.jpg
+    for f in sorted(run_dir.iterdir()):
+        if f.name not in images and (
+            f.name.startswith("train_batch") or f.name.startswith("val_batch")
+        ) and f.suffix in (".jpg", ".png"):
+            images.append(f.name)
     info["result_images"] = images
 
     # Determine status
@@ -378,12 +386,17 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             self._json_response({"error": "Run not found"}, 404)
             return
         # Security: only allow known result image names
-        allowed = {
+        _STATIC_ALLOWED = {
             "confusion_matrix.png", "confusion_matrix_normalized.png",
             "F1_curve.png", "PR_curve.png", "P_curve.png", "R_curve.png",
-            "results.png",
+            "results.png", "labels.jpg",
         }
-        if decoded_name not in allowed:
+        # Also allow train_batch*.jpg and val_batch*.jpg
+        allowed = decoded_name in _STATIC_ALLOWED or (
+            (decoded_name.startswith("train_batch") or decoded_name.startswith("val_batch"))
+            and decoded_name.endswith((".jpg", ".png"))
+        )
+        if not allowed:
             self._json_response({"error": "Image not allowed"}, 403)
             return
         img_path = Path(run["path"]) / decoded_name
@@ -392,7 +405,8 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             return
         content = img_path.read_bytes()
         self.send_response(200)
-        self.send_header("Content-Type", "image/png")
+        ct = "image/jpeg" if decoded_name.endswith(".jpg") else "image/png"
+        self.send_header("Content-Type", ct)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "max-age=10")
         self.end_headers()

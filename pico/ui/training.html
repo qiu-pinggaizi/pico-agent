@@ -531,6 +531,9 @@ function updateTBUI(info) {
     stopBtn.style.display = '';
     link.style.display = '';
     link.href = info.url;
+    placeholder.style.display = 'none';
+    document.getElementById('tb-frame').src = info.url;
+    document.getElementById('tb-frame').style.display = 'block';
   } else {
     status.className = 'status off';
     status.textContent = '未运行';
