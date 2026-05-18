@@ -35,6 +35,24 @@ _run_cache: list[dict[str, Any]] = []
 _cache_ts: float = 0
 _CACHE_TTL = 10  # seconds
 
+# Run metadata (custom display name + notes)
+_META_PATH = Path.home() / ".pico-agent" / "monitor_meta.json"
+
+def _load_meta() -> dict[str, dict[str, str]]:
+    """Load run metadata from disk. Returns {run_path: {name, notes}}."""
+    try:
+        if _META_PATH.exists():
+            return json.loads(_META_PATH.read_text())
+    except Exception:
+        pass
+    return {}
+
+def _save_meta(meta: dict[str, dict[str, str]]) -> None:
+    _META_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+_meta_cache: dict[str, dict[str, str]] = {}
+
 
 # ======================================================================
 # YOLO run scanner
@@ -305,16 +323,32 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         else:
             self._json_response({"error": "Not found"}, 404)
 
+    def do_PUT(self) -> None:
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/")
+
+        m = re.match(r"^/api/runs/(.+)/meta$", path)
+        if m:
+            self._api_update_meta("/".join(path.split("/")[3:-1]))
+        else:
+            self._json_response({"error": "Not found"}, 404)
+
     # ---- API handlers ----
 
     def _api_list_runs(self) -> None:
+        global _meta_cache
+        _meta_cache = _load_meta()
         runs = _scan_for_runs(self.scan_roots)
         # Strip large fields for list view
         summary = []
         for r in runs:
+            path = r.get("path", "")
+            meta = _meta_cache.get(path, {})
+            display_name = meta.get("name") or r["name"]
             summary.append({
                 "id": r["id"],
-                "name": r["name"],
+                "name": display_name,
+                "original_name": r["name"],
                 "path": r["path"],
                 "modified": r["modified"],
                 "status": r.get("status", "unknown"),
@@ -327,6 +361,7 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 "has_args": r.get("has_args", False),
                 "weights_count": len(r.get("weights", [])),
                 "result_images": r.get("result_images", []),
+                "notes": meta.get("notes", ""),
             })
         self._json_response(summary)
 
@@ -348,6 +383,12 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             if run is None:
                 self._json_response({"error": "Run not found"}, 404)
                 return
+        # Inject metadata
+        meta = _meta_cache.get(run.get("path", ""), {})
+        if meta.get("name"):
+            run["original_name"] = run["name"]
+            run["name"] = meta["name"]
+        run["notes"] = meta.get("notes", "")
         self._json_response(run)
 
     def _api_rescan(self) -> None:
@@ -382,6 +423,32 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             global _cache_ts
             _cache_ts = 0
         self._json_response({"success": True, "roots": self.scan_roots})
+
+    def _api_update_meta(self, run_id_encoded: str) -> None:
+        """Update display name and/or notes for a run."""
+        from urllib.parse import unquote
+        decoded = unquote(run_id_encoded)
+        body = self._read_body()
+        if not body:
+            self._json_response({"error": "Empty body"}, 400)
+            return
+        global _meta_cache
+        _meta_cache = _load_meta()
+        path = decoded
+        # Find actual path from runs
+        runs = _scan_for_runs(self.scan_roots)
+        for r in runs:
+            if r["id"] == decoded or r["path"] == decoded:
+                path = r["path"]
+                break
+        entry = _meta_cache.get(path, {})
+        if "name" in body:
+            entry["name"] = str(body["name"])[:200]
+        if "notes" in body:
+            entry["notes"] = str(body["notes"])[:2000]
+        _meta_cache[path] = entry
+        _save_meta(_meta_cache)
+        self._json_response({"success": True, "meta": entry})
 
     def _api_delete_run(self, run_id_encoded: str) -> None:
         """Delete a training run directory and remove it from cache."""
