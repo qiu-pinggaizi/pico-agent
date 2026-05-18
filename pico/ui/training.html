@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pico Training Monitor</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg-0: #0a0e14; --bg-1: #0d1117; --bg-2: #161b22; --bg-3: #21262d;
+  --bg-hover: #30363d; --border: #30363d; --border-l: #3d444d;
+  --t0: #e6edf3; --t1: #c9d1d9; --t2: #8b949e; --t3: #6e7681;
+  --blue: #58a6ff; --blue-dim: #1f6feb; --green: #3fb950; --green-dim: #238636;
+  --orange: #d29922; --red: #f85149; --purple: #bc8cff; --cyan: #39d2c0; --pink: #f778ba;
+  --r: 8px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; background:var(--bg-0); color:var(--t0); height:100vh; overflow:hidden; }
+
+.app { display:grid; grid-template-columns:340px 1fr; grid-template-rows:auto 1fr; height:100vh; }
+
+/* ── Header ── */
+.hdr { grid-column:1/-1; background:var(--bg-2); border-bottom:1px solid var(--border); padding:10px 20px; display:flex; align-items:center; gap:16px; }
+.hdr h1 { font-size:17px; font-weight:600; display:flex; align-items:center; gap:8px; }
+.hdr-right { margin-left:auto; display:flex; gap:12px; align-items:center; }
+.btn { padding:6px 14px; border-radius:var(--r); border:1px solid var(--border); background:var(--bg-3); color:var(--t1); font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; transition:all .15s; }
+.btn:hover { background:var(--bg-hover); border-color:var(--border-l); }
+.btn.primary { background:var(--blue-dim); border-color:var(--blue); color:#fff; }
+.btn.primary:hover { background:var(--blue); }
+.btn.danger { border-color:var(--red); color:var(--red); }
+.btn.danger:hover { background:var(--red); color:#fff; }
+.badge { padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; }
+.badge.running { background:#1a3a1a; color:var(--green); animation:pulse 2s infinite; }
+.badge.completed { background:#1a2a3a; color:var(--blue); }
+.badge.empty { background:#2a2a1a; color:var(--orange); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+.auto-refresh { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--t2); }
+.auto-refresh input { accent-color:var(--green); }
+
+/* ── Sidebar ── */
+.sidebar { background:var(--bg-2); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
+.sb-search { padding:10px; border-bottom:1px solid var(--border); }
+.sb-search input { width:100%; padding:7px 10px; background:var(--bg-3); border:1px solid var(--border); border-radius:var(--r); color:var(--t0); font-size:13px; outline:none; }
+.sb-search input:focus { border-color:var(--blue); }
+.run-list { flex:1; overflow-y:auto; }
+.run-card { padding:12px 14px; border-bottom:1px solid var(--border); cursor:pointer; transition:background .15s; }
+.run-card:hover { background:var(--bg-hover); }
+.run-card.active { background:var(--blue-dim); border-left:3px solid var(--blue); }
+.rc-top { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+.rc-name { font-size:14px; font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rc-meta { font-size:11px; color:var(--t3); display:flex; justify-content:space-between; }
+.rc-metrics { display:flex; gap:10px; margin-top:6px; flex-wrap:wrap; }
+.rc-metric { font-size:11px; color:var(--t2); }
+.rc-metric b { color:var(--t0); font-weight:600; }
+
+/* ── Main ── */
+.main { overflow:hidden; display:flex; flex-direction:column; }
+.tabs { display:flex; background:var(--bg-2); border-bottom:1px solid var(--border); padding:0 16px; }
+.tab { padding:9px 18px; font-size:13px; font-weight:500; color:var(--t2); cursor:pointer; border-bottom:2px solid transparent; transition:all .2s; }
+.tab:hover { color:var(--t0); }
+.tab.active { color:var(--blue); border-bottom-color:var(--blue); }
+.panel { flex:1; overflow-y:auto; padding:20px; scrollbar-width:thin; scrollbar-color:var(--bg-3) transparent; }
+.panel.hidden { display:none; }
+.empty { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--t3); gap:12px; text-align:center; }
+.empty .icon { font-size:56px; opacity:.4; }
+.empty h2 { color:var(--t2); font-size:18px; }
+
+/* ── Overview cards ── */
+.ov-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; margin-bottom:20px; }
+.ov-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r); padding:16px; text-align:center; }
+.ov-card .val { font-size:28px; font-weight:700; margin-bottom:2px; }
+.ov-card .lbl { font-size:12px; color:var(--t2); }
+.ov-card.blue .val { color:var(--blue); }
+.ov-card.green .val { color:var(--green); }
+.ov-card.orange .val { color:var(--orange); }
+.ov-card.purple .val { color:var(--purple); }
+.ov-card.cyan .val { color:var(--cyan); }
+.ov-card.red .val { color:var(--red); }
+
+/* ── Chart containers ── */
+.chart-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+.chart-box { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r); padding:16px; }
+.chart-box h3 { font-size:14px; font-weight:600; margin-bottom:12px; color:var(--t1); display:flex; align-items:center; gap:6px; }
+.chart-box canvas { width:100%!important; }
+.chart-full { grid-column:1/-1; }
+
+/* ── Config viewer ── */
+.config-block { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r); padding:16px; margin-bottom:16px; }
+.config-block h3 { font-size:14px; font-weight:600; margin-bottom:12px; color:var(--t1); }
+.config-table { width:100%; border-collapse:collapse; font-size:13px; }
+.config-table td { padding:6px 12px; border-bottom:1px solid var(--border); }
+.config-table td:first-child { color:var(--cyan); font-family:monospace; white-space:nowrap; width:200px; }
+.config-table td:last-child { color:var(--t1); word-break:break-all; }
+
+/* ── Weights table ── */
+.wt-table { width:100%; border-collapse:collapse; font-size:13px; }
+.wt-table th, .wt-table td { padding:8px 12px; text-align:left; border-bottom:1px solid var(--border); }
+.wt-table th { color:var(--t2); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+.wt-table tr:hover td { background:var(--bg-hover); }
+
+/* ── Result images ── */
+.img-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:16px; }
+.img-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r); overflow:hidden; }
+.img-card img { width:100%; display:block; }
+.img-card .caption { padding:8px 12px; font-size:12px; color:var(--t2); }
+
+/* ── TensorBoard ── */
+.tb-bar { display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:12px; background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r); }
+.tb-bar .status { font-size:13px; }
+.tb-bar .status.on { color:var(--green); }
+.tb-bar .status.off { color:var(--t3); }
+.tb-iframe { width:100%; height:calc(100vh - 200px); border:1px solid var(--border); border-radius:var(--r); }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width:7px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--bg-3); border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="hdr">
+    <h1>🏋️ Training Monitor</h1>
+    <div class="hdr-right">
+      <label class="auto-refresh"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
+      <button class="btn" id="btn-rescan">🔄 Rescan</button>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sb-search"><input type="text" id="run-filter" placeholder="🔍 搜索训练任务..."></div>
+    <div class="run-list" id="run-list"><div class="empty" style="padding:40px"><div class="icon">🏋️</div><p>加载中...</p></div></div>
+  </div>
+
+  <div class="main">
+    <div class="tabs">
+      <div class="tab active" data-tab="overview">📊 Overview</div>
+      <div class="tab" data-tab="charts">📈 Charts</div>
+      <div class="tab" data-tab="config">⚙️ Config</div>
+      <div class="tab" data-tab="images">🖼️ Results</div>
+      <div class="tab" data-tab="tensorboard">📉 TensorBoard</div>
+    </div>
+
+    <!-- Overview -->
+    <div class="panel" id="panel-overview">
+      <div class="empty" id="ov-empty"><div class="icon">📊</div><h2>选择一个训练任务</h2><p>从左侧列表选择一个训练任务查看详情</p></div>
+      <div id="ov-content" style="display:none">
+        <div class="ov-grid" id="ov-cards"></div>
+        <div class="chart-row"><div class="chart-box"><h3>📉 Loss 曲线</h3><canvas id="loss-mini" height="180"></canvas></div>
+        <div class="chart-box"><h3>📈 mAP 曲线</h3><canvas id="map-mini" height="180"></canvas></div></div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="panel hidden" id="panel-charts">
+      <div class="empty" id="ch-empty"><div class="icon">📈</div><h2>选择一个训练任务</h2></div>
+      <div id="ch-content" style="display:none">
+        <div class="chart-row"><div class="chart-box chart-full"><h3>📉 Training & Validation Loss</h3><canvas id="loss-chart" height="220"></canvas></div></div>
+        <div class="chart-row"><div class="chart-box"><h3>📈 mAP Metrics</h3><canvas id="map-chart" height="200"></canvas></div>
+        <div class="chart-box"><h3>🎯 Precision & Recall</h3><canvas id="pr-chart" height="200"></canvas></div></div>
+        <div class="chart-row"><div class="chart-box chart-full"><h3>📚 Learning Rate</h3><canvas id="lr-chart" height="160"></canvas></div></div>
+      </div>
+    </div>
+
+    <!-- Config -->
+    <div class="panel hidden" id="panel-config">
+      <div class="empty" id="cfg-empty"><div class="icon">⚙️</div><h2>选择一个训练任务</h2></div>
+      <div id="cfg-content" style="display:none">
+        <div class="config-block"><h3>🏋️ 训练参数 (args.yaml)</h3><table class="config-table" id="cfg-table"></table></div>
+        <div class="config-block"><h3>💾 模型权重</h3><table class="wt-table"><thead><tr><th>文件名</th><th>大小</th><th>修改时间</th></tr></thead><tbody id="wt-tbody"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Result images -->
+    <div class="panel hidden" id="panel-images">
+      <div class="empty" id="img-empty"><div class="icon">🖼️</div><h2>选择一个训练任务</h2></div>
+      <div class="img-grid" id="img-grid" style="display:none"></div>
+    </div>
+
+    <!-- TensorBoard -->
+    <div class="panel hidden" id="panel-tensorboard">
+      <div class="tb-bar">
+        <span>TensorBoard:</span>
+        <span class="status" id="tb-status">检查中...</span>
+        <button class="btn primary" id="tb-start-btn">▶️ Start</button>
+        <button class="btn danger" id="tb-stop-btn" style="display:none">⏹ Stop</button>
+        <a class="btn" id="tb-link" href="#" target="_blank" style="display:none">🔗 Open in new tab</a>
+      </div>
+      <div id="tb-placeholder" class="empty"><div class="icon">📉</div><h2>TensorBoard</h2><p>选择一个训练任务后点击 Start 启动 TensorBoard</p></div>
+      <iframe id="tb-frame" class="tb-iframe" style="display:none"></iframe>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+"use strict";
+
+const API = '';
+let runs = [];
+let currentRun = null;
+let charts = {};
+let refreshTimer = null;
+let runIndexMap = {};  // index -> run.id, for safe onclick binding
+
+// ── Helpers ──
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function fmt(val, decimals) {
+  if (val == null || val === '-') return '-';
+  if (typeof val === 'number') return val.toFixed(decimals || 3);
+  return String(val);
+}
+
+async function api(path, opts) {
+  const r = await fetch(API + path, opts);
+  return r.json();
+}
+
+// ── Init ──
+async function init() {
+  runs = await api('/api/runs');
+  renderRunList(runs);
+  checkTB();
+  startAutoRefresh();
+  bindEvents();
+}
+
+function bindEvents() {
+  document.getElementById('btn-rescan').addEventListener('click', rescan);
+  document.getElementById('run-filter').addEventListener('input', function() { renderRunList(runs); });
+  document.getElementById('tb-start-btn').addEventListener('click', startTB);
+  document.getElementById('tb-stop-btn').addEventListener('click', stopTB);
+
+  // Tab clicks
+  document.querySelectorAll('.tab').forEach(function(t) {
+    t.addEventListener('click', function() { switchTab(t.dataset.tab); });
+  });
+}
+
+function startAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(async function() {
+    if (!document.getElementById('auto-refresh').checked) return;
+    try {
+      runs = await api('/api/runs');
+      renderRunList(runs);
+      if (currentRun) {
+        var fresh = runs.find(function(r) { return r.id === currentRun.id; });
+        if (fresh && fresh.status === 'running') selectRunByIdx(runs.indexOf(fresh));
+      }
+    } catch(e) { console.error('Auto-refresh failed:', e); }
+  }, 10000);
+}
+
+// ── Run list ──
+function renderRunList(list) {
+  var el = document.getElementById('run-list');
+  var q = document.getElementById('run-filter').value.toLowerCase();
+  var filtered = q ? list.filter(function(r) {
+    return r.name.toLowerCase().includes(q) || r.path.toLowerCase().includes(q);
+  }) : list;
+
+  if (!filtered.length) {
+    el.innerHTML = '<div class="empty" style="padding:30px"><div class="icon">📭</div><p>未发现训练任务</p></div>';
+    return;
+  }
+
+  // Build index map for safe onclick
+  runIndexMap = {};
+  var html = '';
+  filtered.forEach(function(r, i) {
+    var idx = list.indexOf(r);
+    runIndexMap[i] = idx;
+    var m = r.metrics || {};
+    var map50 = r.best_mAP50 != null ? r.best_mAP50 : (m['metrics/mAP50(B)'] || '-');
+    var map5095 = r['best_mAP50-95'] != null ? r['best_mAP50-95'] : (m['metrics/mAP50-95(B)'] || '-');
+    var isActive = currentRun && currentRun.id === r.id;
+    html += '<div class="run-card' + (isActive ? ' active' : '') + '" data-idx="' + i + '">' +
+      '<div class="rc-top"><span class="rc-name">' + esc(r.name) + '</span><span class="badge ' + r.status + '">' + r.status + '</span></div>' +
+      '<div class="rc-meta"><span>' + r.epochs_logged + ' epochs</span><span>' + r.modified + '</span></div>' +
+      '<div class="rc-metrics"><span class="rc-metric">mAP50: <b>' + fmt(map50) + '</b></span>' +
+      '<span class="rc-metric">mAP50-95: <b>' + fmt(map5095) + '</b></span></div></div>';
+  });
+  el.innerHTML = html;
+
+  // Bind click events via delegation
+  el.querySelectorAll('.run-card').forEach(function(card) {
+    card.addEventListener('click', function() {
+      var idx = parseInt(card.dataset.idx);
+      selectRunByIdx(idx);
+    });
+  });
+}
+
+// ── Select run (by index in runs array) ──
+async function selectRunByIdx(idx) {
+  var r = runs[idx];
+  if (!r) return;
+  try {
+    currentRun = await api('/api/runs/' + encodeURIComponent(r.id));
+    renderRunList(runs);
+    renderOverview(currentRun);
+    renderCharts(currentRun);
+    renderConfig(currentRun);
+    renderImages(currentRun);
+    switchTab('overview');
+  } catch(e) {
+    console.error('Failed to load run:', e);
+  }
+}
+
+// ── Overview ──
+function renderOverview(run) {
+  document.getElementById('ov-empty').style.display = 'none';
+  document.getElementById('ov-content').style.display = 'block';
+  var m = run.metrics || {};
+  var cards = document.getElementById('ov-cards');
+  var epoch = m.epoch != null ? Math.round(m.epoch) : run.epochs_logged;
+  var map50 = run.best_mAP50 != null ? run.best_mAP50 : (m['metrics/mAP50(B)'] || '-');
+  var map5095 = run['best_mAP50-95'] != null ? run['best_mAP50-95'] : (m['metrics/mAP50-95(B)'] || '-');
+  var boxLoss = m['train/box_loss'] || '-';
+  var clsLoss = m['train/cls_loss'] || '-';
+  var dflLoss = m['train/dfl_loss'] || '-';
+  var prec = m['metrics/precision(B)'] || '-';
+  var rec = m['metrics/recall(B)'] || '-';
+  cards.innerHTML =
+    '<div class="ov-card blue"><div class="val">' + epoch + '</div><div class="lbl">Epoch</div></div>' +
+    '<div class="ov-card green"><div class="val">' + fmt(map50) + '</div><div class="lbl">Best mAP50</div></div>' +
+    '<div class="ov-card cyan"><div class="val">' + fmt(map5095) + '</div><div class="lbl">Best mAP50-95</div></div>' +
+    '<div class="ov-card orange"><div class="val">' + fmt(boxLoss, 4) + '</div><div class="lbl">Box Loss</div></div>' +
+    '<div class="ov-card purple"><div class="val">' + fmt(clsLoss, 4) + '</div><div class="lbl">Cls Loss</div></div>' +
+    '<div class="ov-card red"><div class="val">' + fmt(dflLoss, 4) + '</div><div class="lbl">DFL Loss</div></div>' +
+    '<div class="ov-card green"><div class="val">' + fmt(prec) + '</div><div class="lbl">Precision</div></div>' +
+    '<div class="ov-card blue"><div class="val">' + fmt(rec) + '</div><div class="lbl">Recall</div></div>';
+  renderMiniCharts(run);
+}
+
+function renderMiniCharts(run) {
+  var data = run.results_data || [];
+  if (!data.length) return;
+  var epochs = data.map(function(_, i) { return i + 1; });
+  var lossKeys = ['train/box_loss','train/cls_loss','train/dfl_loss'].filter(function(k) { return k in data[0]; });
+  var valLossKeys = ['val/box_loss','val/cls_loss','val/dfl_loss'].filter(function(k) { return k in data[0]; });
+  var map50 = data.map(function(r) { return r['metrics/mAP50(B)'] || null; });
+  var map5095 = data.map(function(r) { return r['metrics/mAP50-95(B)'] || null; });
+
+  makeChart('loss-mini', epochs,
+    lossKeys.map(function(k) {
+      return {label: k.replace('train/','train_'), data: data.map(function(r) { return r[k] || 0; }),
+        color: k.includes('box') ? '#f85149' : k.includes('cls') ? '#d29922' : '#bc8cff'};
+    }).concat(valLossKeys.map(function(k) {
+      return {label: k.replace('val/','val_'), data: data.map(function(r) { return r[k] || 0; }),
+        color: k.includes('box') ? '#f8514980' : k.includes('cls') ? '#d2992280' : '#bc8cff80', dash: [5,5]};
+    }))
+  );
+  makeChart('map-mini', epochs, [
+    {label: 'mAP50', data: map50, color: '#3fb950'},
+    {label: 'mAP50-95', data: map5095, color: '#58a6ff'},
+  ]);
+}
+
+// ── Full Charts ──
+function renderCharts(run) {
+  var data = run.results_data || [];
+  if (!data.length) {
+    document.getElementById('ch-empty').style.display = 'flex';
+    document.getElementById('ch-content').style.display = 'none';
+    return;
+  }
+  document.getElementById('ch-empty').style.display = 'none';
+  document.getElementById('ch-content').style.display = 'block';
+  var epochs = data.map(function(_, i) { return i + 1; });
+  var lossKeys = ['train/box_loss','train/cls_loss','train/dfl_loss'].filter(function(k) { return k in data[0]; });
+  var valLossKeys = ['val/box_loss','val/cls_loss','val/dfl_loss'].filter(function(k) { return k in data[0]; });
+  var colors = {box: '#f85149', cls: '#d29922', dfl: '#bc8cff'};
+
+  makeChart('loss-chart', epochs,
+    lossKeys.map(function(k) {
+      var c = k.split('/')[1].split('_')[0];
+      return {label: k.replace('train/',''), data: data.map(function(r) { return r[k] || 0; }), color: colors[c] || '#aaa'};
+    }).concat(valLossKeys.map(function(k) {
+      var c = k.split('/')[1].split('_')[0];
+      return {label: k.replace('val/','val_'), data: data.map(function(r) { return r[k] || 0; }), color: (colors[c] || '#aaa') + '80', dash: [5,5]};
+    })), true
+  );
+  makeChart('map-chart', epochs, [
+    {label: 'mAP50', data: data.map(function(r) { return r['metrics/mAP50(B)'] || 0; }), color: '#3fb950'},
+    {label: 'mAP50-95', data: data.map(function(r) { return r['metrics/mAP50-95(B)'] || 0; }), color: '#58a6ff'},
+  ], true);
+  makeChart('pr-chart', epochs, [
+    {label: 'Precision', data: data.map(function(r) { return r['metrics/precision(B)'] || 0; }), color: '#39d2c0'},
+    {label: 'Recall', data: data.map(function(r) { return r['metrics/recall(B)'] || 0; }), color: '#f778ba'},
+  ], true);
+  var lrKeys = ['lr/pg0','lr/pg1','lr/pg2'].filter(function(k) { return k in data[0]; });
+  makeChart('lr-chart', epochs, lrKeys.map(function(k, i) {
+    return {label: k, data: data.map(function(r) { return r[k] || 0; }), color: ['#58a6ff','#3fb950','#d29922'][i]};
+  }), true);
+}
+
+function makeChart(canvasId, labels, series, detailed) {
+  if (charts[canvasId]) charts[canvasId].destroy();
+  var ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  charts[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: series.map(function(s) {
+        return {
+          label: s.label, data: s.data, borderColor: s.color, backgroundColor: s.color + '18',
+          borderWidth: detailed ? 2 : 1.5, pointRadius: detailed ? 0 : 1, pointHoverRadius: 4,
+          tension: 0.3, fill: detailed && s.label.indexOf('train') === 0, borderDash: s.dash || [],
+        };
+      })
+    },
+    options: {
+      responsive: true, animation: {duration: 300},
+      interaction: {mode: 'index', intersect: false},
+      plugins: {
+        legend: {labels: {color: '#8b949e', font: {size: 11}}, position: 'top'},
+        tooltip: {backgroundColor: '#21262d', titleColor: '#e6edf3', bodyColor: '#c9d1d9', borderColor: '#30363d', borderWidth: 1, padding: 10}
+      },
+      scales: {
+        x: {ticks: {color: '#6e7681', maxTicksLimit: 15, font: {size: 10}}, grid: {color: '#21262d'}},
+        y: {ticks: {color: '#6e7681', font: {size: 10}}, grid: {color: '#21262d'}}
+      }
+    }
+  });
+}
+
+// ── Config ──
+function renderConfig(run) {
+  document.getElementById('cfg-empty').style.display = 'none';
+  document.getElementById('cfg-content').style.display = 'block';
+  var table = document.getElementById('cfg-table');
+  if (run.args && typeof run.args === 'object') {
+    table.innerHTML = Object.entries(run.args).map(function(e) {
+      return '<tr><td>' + esc(e[0]) + '</td><td>' + esc(String(e[1])) + '</td></tr>';
+    }).join('');
+  } else if (run.args_raw) {
+    table.innerHTML = run.args_raw.split('\n').filter(Boolean).map(function(l) {
+      var i = l.indexOf(':');
+      return i > 0
+        ? '<tr><td>' + esc(l.slice(0, i).trim()) + '</td><td>' + esc(l.slice(i + 1).trim()) + '</td></tr>'
+        : '<tr><td colspan="2">' + esc(l) + '</td></tr>';
+    }).join('');
+  } else {
+    table.innerHTML = '<tr><td colspan="2" style="color:var(--t3)">无 args.yaml</td></tr>';
+  }
+
+  var tbody = document.getElementById('wt-tbody');
+  if (run.weights && run.weights.length) {
+    tbody.innerHTML = run.weights.map(function(w) {
+      return '<tr><td style="font-family:monospace;color:var(--cyan)">' + esc(w.name) + '</td><td>' + w.size_mb + ' MB</td><td>' + w.modified + '</td></tr>';
+    }).join('');
+  } else {
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--t3)">无权重文件</td></tr>';
+  }
+}
+
+// ── Result images ──
+function renderImages(run) {
+  var grid = document.getElementById('img-grid');
+  if (!run.result_images || !run.result_images.length) {
+    document.getElementById('img-empty').style.display = 'flex';
+    grid.style.display = 'none';
+    return;
+  }
+  document.getElementById('img-empty').style.display = 'none';
+  grid.style.display = 'grid';
+
+  // Use API endpoint for serving images
+  var baseUrl = '/api/runs/' + encodeURIComponent(run.id) + '/image/';
+  grid.innerHTML = run.result_images.map(function(name) {
+    return '<div class="img-card"><img src="' + esc(baseUrl + encodeURIComponent(name)) + '" onerror="this.style.display=\'none\'" alt="' + esc(name) + '"><div class="caption">' + esc(name) + '</div></div>';
+  }).join('');
+}
+
+// ── TensorBoard ──
+async function checkTB() {
+  var info = await api('/api/tensorboard/status');
+  updateTBUI(info);
+}
+
+function updateTBUI(info) {
+  var status = document.getElementById('tb-status');
+  var startBtn = document.getElementById('tb-start-btn');
+  var stopBtn = document.getElementById('tb-stop-btn');
+  var link = document.getElementById('tb-link');
+  if (info.running) {
+    status.className = 'status on';
+    status.textContent = '运行中 (port ' + info.port + ')';
+    startBtn.style.display = 'none';
+    stopBtn.style.display = '';
+    link.style.display = '';
+    link.href = info.url;
+  } else {
+    status.className = 'status off';
+    status.textContent = '未运行';
+    startBtn.style.display = '';
+    stopBtn.style.display = 'none';
+    link.style.display = 'none';
+  }
+}
+
+async function startTB() {
+  var logdir = currentRun ? currentRun.path : '';
+  if (!logdir) { alert('请先选择一个训练任务'); return; }
+  var result = await api('/api/tensorboard/start', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({logdir: logdir, port: 6006})
+  });
+  if (result.success) {
+    updateTBUI({running: true, port: result.port, url: result.url});
+    document.getElementById('tb-frame').src = result.url;
+    document.getElementById('tb-frame').style.display = 'block';
+    document.getElementById('tb-placeholder').style.display = 'none';
+  } else { alert('启动失败: ' + result.error); }
+}
+
+async function stopTB() {
+  await api('/api/tensorboard/stop', {method: 'POST'});
+  updateTBUI({running: false});
+  document.getElementById('tb-frame').style.display = 'none';
+  document.getElementById('tb-placeholder').style.display = 'flex';
+}
+
+async function rescan() {
+  await api('/api/scan');
+  runs = await api('/api/runs');
+  renderRunList(runs);
+}
+
+// ── Tab switch ──
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(function(t) {
+    t.classList.toggle('active', t.dataset.tab === name);
+  });
+  document.querySelectorAll('.panel').forEach(function(p) {
+    p.classList.toggle('hidden', p.id !== 'panel-' + name);
+  });
+}
+
+// ── Start ──
+init();
+
+})();
+</script>
+</body>
+</html>

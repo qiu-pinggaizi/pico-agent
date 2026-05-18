@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pico Agent Dashboard</title>
+<style>
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-hover: #30363d;
+  --border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-dim: #6e7681;
+  --accent: #58a6ff;
+  --accent-dim: #1f6feb;
+  --green: #3fb950;
+  --orange: #d29922;
+  --red: #f85149;
+  --purple: #bc8cff;
+  --pink: #f778ba;
+  --cyan: #39d2c0;
+  --radius: 8px;
+  --shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Layout */
+.app {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+}
+
+/* Header */
+.header {
+  grid-column: 1 / -1;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 10;
+}
+
+.header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header h1 span { font-size: 22px; }
+
+.stats-bar {
+  display: flex;
+  gap: 24px;
+  margin-left: auto;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.stat-value {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+/* Sidebar */
+.sidebar {
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.search-box {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-box input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.search-box input:focus {
+  border-color: var(--accent);
+}
+
+.search-box input::placeholder {
+  color: var(--text-dim);
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-tertiary) transparent;
+}
+
+.session-item {
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.session-item:hover { background: var(--bg-hover); }
+.session-item.active { background: var(--accent-dim); border-left: 3px solid var(--accent); }
+
+.session-title {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+}
+
+/* Main content */
+.main {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tab bar */
+.tab-bar {
+  display: flex;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+}
+
+.tab {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.tab:hover { color: var(--text-primary); }
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* Panels */
+.panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-tertiary) transparent;
+}
+
+.panel.hidden { display: none; }
+
+/* Welcome / Empty state */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-dim);
+  text-align: center;
+  gap: 16px;
+}
+
+.empty-state .icon { font-size: 64px; opacity: 0.5; }
+.empty-state h2 { font-size: 20px; color: var(--text-secondary); }
+.empty-state p { font-size: 14px; max-width: 400px; line-height: 1.6; }
+
+/* Messages */
+.message {
+  margin-bottom: 16px;
+  display: flex;
+  gap: 12px;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } }
+
+.msg-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.msg-avatar.user { background: var(--accent-dim); color: var(--accent); }
+.msg-avatar.assistant { background: #238636; color: var(--green); }
+.msg-avatar.tool { background: #3d1d00; color: var(--orange); }
+
+.msg-body { flex: 1; min-width: 0; }
+
+.msg-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.msg-role {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.msg-role.user { color: var(--accent); }
+.msg-role.assistant { color: var(--green); }
+.msg-role.tool { color: var(--orange); }
+
+.msg-time {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.msg-content {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-content code {
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.msg-content pre {
+  background: var(--bg-tertiary);
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  margin: 8px 0;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  line-height: 1.5;
+}
+
+/* Tool call card */
+.tool-call-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--orange);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin: 8px 0;
+}
+
+.tool-call-name {
+  font-weight: 600;
+  color: var(--orange);
+  font-size: 13px;
+  font-family: monospace;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-call-name::before {
+  content: '⚡';
+  font-size: 12px;
+}
+
+.tool-call-args {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: monospace;
+  background: var(--bg-primary);
+  padding: 8px 12px;
+  border-radius: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Tool result card */
+.tool-result-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--cyan);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin: 6px 0;
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-secondary);
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Timeline */
+.timeline {
+  position: relative;
+  padding-left: 32px;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: transform 0.15s;
+}
+
+.timeline-item:hover { transform: translateX(4px); }
+
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -26px;
+  top: 16px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--orange);
+  border: 2px solid var(--bg-primary);
+}
+
+.timeline-item.success::before { background: var(--green); }
+.timeline-item.error::before { background: var(--red); }
+
+.timeline-tool {
+  font-weight: 600;
+  color: var(--orange);
+  font-size: 14px;
+  font-family: monospace;
+  margin-bottom: 4px;
+}
+
+.timeline-time {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.timeline-args {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  font-family: monospace;
+  background: var(--bg-primary);
+  padding: 6px 10px;
+  border-radius: 4px;
+  max-height: 80px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+/* Stats panel */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stats-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: center;
+}
+
+.stats-card .value {
+  font-size: 36px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.stats-card .label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.stats-card.blue .value { color: var(--accent); }
+.stats-card.green .value { color: var(--green); }
+.stats-card.orange .value { color: var(--orange); }
+.stats-card.purple .value { color: var(--purple); }
+
+/* Tool usage table */
+.tool-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+}
+
+.tool-table th, .tool-table td {
+  padding: 10px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.tool-table th {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tool-table tr:hover td { background: var(--bg-hover); }
+
+.tool-name-cell {
+  font-family: monospace;
+  color: var(--orange);
+  font-weight: 500;
+}
+
+/* Bar chart */
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 160px;
+  padding: 16px 0;
+}
+
+.bar-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.bar {
+  width: 100%;
+  max-width: 48px;
+  background: linear-gradient(to top, var(--accent-dim), var(--accent));
+  border-radius: 4px 4px 0 0;
+  min-height: 4px;
+  transition: height 0.3s ease;
+}
+
+.bar-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.bar-value {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* Search results highlight */
+.search-result {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.search-result:hover { background: var(--bg-hover); }
+
+.search-result .sr-session {
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.search-result .sr-role {
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.search-result .sr-content {
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result .sr-time {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* Section title */
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title .emoji { font-size: 18px; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bg-hover); }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .sidebar.show { display: flex; position: fixed; inset: 0; z-index: 100; }
+}
+
+/* Loading */
+.spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <h1><span>🤖</span> Pico Agent Dashboard</h1>
+    <div class="stats-bar">
+      <div class="stat-item">
+        Sessions: <span class="stat-value" id="hdr-sessions">-</span>
+      </div>
+      <div class="stat-item">
+        Messages: <span class="stat-value" id="hdr-messages">-</span>
+      </div>
+      <div class="stat-item">
+        Tool Calls: <span class="stat-value" id="hdr-tools">-</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+    <div class="search-box">
+      <input type="text" id="search-input" placeholder="🔍 搜索会话和消息...">
+    </div>
+    <div class="session-list" id="session-list">
+      <div class="empty-state" style="padding: 40px 20px;">
+        <div class="spinner"></div>
+        <p>加载中...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="tab-bar">
+      <div class="tab active" data-tab="conversation" onclick="switchTab('conversation')">💬 对话</div>
+      <div class="tab" data-tab="timeline" onclick="switchTab('timeline')">⚡ 工具时间线</div>
+      <div class="tab" data-tab="stats" onclick="switchTab('stats')">📊 统计</div>
+      <div class="tab" data-tab="search-results" onclick="switchTab('search-results')" id="tab-search" style="display:none;">🔍 搜索结果</div>
+    </div>
+
+    <!-- Conversation Panel -->
+    <div class="panel" id="panel-conversation">
+      <div class="empty-state" id="welcome">
+        <div class="icon">🤖</div>
+        <h2>Pico Agent Dashboard</h2>
+        <p>从左侧选择一个会话查看对话记录，或使用搜索功能查找特定内容。</p>
+      </div>
+      <div id="messages-container" style="display:none;"></div>
+    </div>
+
+    <!-- Timeline Panel -->
+    <div class="panel hidden" id="panel-timeline">
+      <div class="empty-state" id="timeline-empty">
+        <div class="icon">⚡</div>
+        <h2>工具调用时间线</h2>
+        <p>选择一个会话查看工具调用的时间线视图。</p>
+      </div>
+      <div class="timeline" id="timeline-container" style="display:none;"></div>
+    </div>
+
+    <!-- Stats Panel -->
+    <div class="panel hidden" id="panel-stats">
+      <div class="section-title"><span class="emoji">📊</span> 数据概览</div>
+      <div class="stats-grid" id="stats-cards"></div>
+      <div class="section-title" style="margin-top: 24px;"><span class="emoji">📈</span> 近期活跃度</div>
+      <div class="bar-chart" id="activity-chart"></div>
+      <div class="section-title" style="margin-top: 24px;"><span class="emoji">🔧</span> 工具使用排行</div>
+      <table class="tool-table" id="tool-table">
+        <thead><tr><th>工具名称</th><th>调用次数</th><th>占比</th></tr></thead>
+        <tbody id="tool-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Search Results Panel -->
+    <div class="panel hidden" id="panel-search-results">
+      <div id="search-results-container"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let currentSessionId = null;
+let sessionsCache = [];
+
+// ── Fetch helpers ──
+async function api(path) {
+  const r = await fetch(API + path);
+  return r.json();
+}
+
+// ── Init ──
+async function init() {
+  const [sessions, stats] = await Promise.all([
+    api('/api/sessions'),
+    api('/api/stats'),
+  ]);
+  sessionsCache = sessions;
+  renderSessionList(sessions);
+  renderStats(stats);
+  updateHeaderStats(stats);
+}
+
+// ── Session list ──
+function renderSessionList(sessions) {
+  const el = document.getElementById('session-list');
+  if (!sessions.length) {
+    el.innerHTML = '<div class="empty-state" style="padding:40px 20px;"><div class="icon">📭</div><p>还没有会话记录</p></div>';
+    return;
+  }
+  el.innerHTML = sessions.map(s => `
+    <div class="session-item${s.id === currentSessionId ? ' active' : ''}"
+         onclick="selectSession('${s.id}')">
+      <div class="session-title">${escHtml(s.title)}</div>
+      <div class="session-meta">
+        <span>${s.id.slice(0, 8)}</span>
+        <span>${formatTime(s.updated_at)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Select session ──
+async function selectSession(sid) {
+  currentSessionId = sid;
+  renderSessionList(sessionsCache);
+
+  const data = await api(`/api/sessions/${sid}`);
+  renderConversation(data.session, data.messages);
+  renderTimeline(data.messages);
+
+  switchTab('conversation');
+}
+
+// ── Render conversation ──
+function renderConversation(session, messages) {
+  document.getElementById('welcome').style.display = 'none';
+  const container = document.getElementById('messages-container');
+  container.style.display = 'block';
+
+  let html = `<div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);">
+    <h2 style="font-size:18px;margin-bottom:4px;">${escHtml(session.title)}</h2>
+    <span style="font-size:12px;color:var(--text-dim);">${session.id} · 创建于 ${formatTime(session.created_at)}</span>
+  </div>`;
+
+  for (const msg of messages) {
+    if (msg.role === 'system') continue;
+
+    if (msg.role === 'user') {
+      html += renderUserMsg(msg);
+    } else if (msg.role === 'assistant') {
+      html += renderAssistantMsg(msg);
+    } else if (msg.role === 'tool') {
+      html += renderToolResultMsg(msg);
+    }
+  }
+
+  container.innerHTML = html;
+}
+
+function renderUserMsg(msg) {
+  return `<div class="message">
+    <div class="msg-avatar user">U</div>
+    <div class="msg-body">
+      <div class="msg-header">
+        <span class="msg-role user">User</span>
+        <span class="msg-time">${formatTime(msg.timestamp)}</span>
+      </div>
+      <div class="msg-content">${formatContent(msg.content)}</div>
+    </div>
+  </div>`;
+}
+
+function renderAssistantMsg(msg) {
+  let html = `<div class="message">
+    <div class="msg-avatar assistant">A</div>
+    <div class="msg-body">
+      <div class="msg-header">
+        <span class="msg-role assistant">Assistant</span>
+        <span class="msg-time">${formatTime(msg.timestamp)}</span>
+      </div>`;
+
+  if (msg.content) {
+    html += `<div class="msg-content">${formatContent(msg.content)}</div>`;
+  }
+
+  if (msg.tool_calls) {
+    for (const tc of msg.tool_calls) {
+      html += `<div class="tool-call-card">
+        <div class="tool-call-name">${escHtml(tc.name)}</div>
+        <div class="tool-call-args">${escHtml(JSON.stringify(tc.arguments, null, 2))}</div>
+      </div>`;
+    }
+  }
+
+  html += '</div></div>';
+  return html;
+}
+
+function renderToolResultMsg(msg) {
+  let content = msg.content;
+  let parsed = null;
+  try { parsed = JSON.parse(content); } catch(e) {}
+
+  let display = content;
+  if (parsed && typeof parsed === 'object') {
+    if (parsed.success === false) {
+      display = `❌ Error: ${parsed.error || 'unknown'}`;
+    } else if (parsed.stdout_tail) {
+      display = parsed.stdout_tail;
+    } else {
+      display = JSON.stringify(parsed, null, 2);
+    }
+  }
+
+  return `<div class="message">
+    <div class="msg-avatar tool">T</div>
+    <div class="msg-body">
+      <div class="msg-header">
+        <span class="msg-role tool">Tool Result${msg.tool_call_id ? ' (' + msg.tool_call_id.slice(0, 8) + ')' : ''}</span>
+        <span class="msg-time">${formatTime(msg.timestamp)}</span>
+      </div>
+      <div class="tool-result-card">${escHtml(display)}</div>
+    </div>
+  </div>`;
+}
+
+// ── Render timeline ──
+function renderTimeline(messages) {
+  const el = document.getElementById('timeline-container');
+  const empty = document.getElementById('timeline-empty');
+
+  const toolEvents = [];
+  // Pair tool calls with their results
+  const toolCallMap = {};
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.tool_calls) {
+      for (const tc of msg.tool_calls) {
+        toolCallMap[tc.id] = { name: tc.name, args: tc.arguments, time: msg.timestamp };
+      }
+    }
+  }
+  for (const msg of messages) {
+    if (msg.role === 'tool' && msg.tool_call_id) {
+      const call = toolCallMap[msg.tool_call_id];
+      let success = true;
+      try {
+        const p = JSON.parse(msg.content);
+        if (p.success === false) success = false;
+      } catch(e) {}
+      toolEvents.push({
+        name: call ? call.name : 'unknown',
+        args: call ? call.arguments : {},
+        result: msg.content,
+        time: msg.timestamp,
+        success,
+      });
+    }
+  }
+
+  if (!toolEvents.length) {
+    empty.style.display = 'flex';
+    el.style.display = 'none';
+    return;
+  }
+
+  empty.style.display = 'none';
+  el.style.display = 'block';
+
+  el.innerHTML = toolEvents.map(ev => `
+    <div class="timeline-item ${ev.success ? 'success' : 'error'}">
+      <div class="timeline-tool">${escHtml(ev.name)}</div>
+      <div class="timeline-time">${formatTime(ev.time)}</div>
+      <div class="timeline-args">${escHtml(truncate(JSON.stringify(ev.args, null, 2), 200))}</div>
+    </div>
+  `).join('');
+}
+
+// ── Stats ──
+function renderStats(stats) {
+  const cards = document.getElementById('stats-cards');
+  cards.innerHTML = `
+    <div class="stats-card blue"><div class="value">${stats.session_count}</div><div class="label">会话总数</div></div>
+    <div class="stats-card green"><div class="value">${stats.message_count}</div><div class="label">消息总数</div></div>
+    <div class="stats-card orange"><div class="value">${stats.tool_call_count}</div><div class="label">工具调用</div></div>
+    <div class="stats-card purple"><div class="value">${Object.keys(stats.tool_usage).length}</div><div class="label">工具种类</div></div>
+  `;
+
+  // Activity chart
+  const chart = document.getElementById('activity-chart');
+  const days = stats.daily_activity;
+  if (days.length) {
+    const max = Math.max(...days.map(d => d.count), 1);
+    chart.innerHTML = days.map(d => `
+      <div class="bar-group">
+        <div class="bar-value">${d.count}</div>
+        <div class="bar" style="height:${(d.count / max) * 120}px"></div>
+        <div class="bar-label">${d.date ? d.date.slice(5) : ''}</div>
+      </div>
+    `).join('');
+  } else {
+    chart.innerHTML = '<div style="color:var(--text-dim);padding:20px;">暂无数据</div>';
+  }
+
+  // Tool usage table
+  const tbody = document.getElementById('tool-tbody');
+  const entries = Object.entries(stats.tool_usage);
+  const total = entries.reduce((s, [, v]) => s + v, 0);
+  if (entries.length) {
+    tbody.innerHTML = entries.map(([name, count]) => `
+      <tr>
+        <td class="tool-name-cell">${escHtml(name)}</td>
+        <td>${count}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="width:${Math.max(count / total * 200, 4)}px;height:8px;background:var(--orange);border-radius:4px;"></div>
+            <span style="font-size:12px;color:var(--text-dim);">${(count / total * 100).toFixed(1)}%</span>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  } else {
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text-dim);text-align:center;padding:20px;">暂无数据</td></tr>';
+  }
+}
+
+function updateHeaderStats(stats) {
+  document.getElementById('hdr-sessions').textContent = stats.session_count;
+  document.getElementById('hdr-messages').textContent = stats.message_count;
+  document.getElementById('hdr-tools').textContent = stats.tool_call_count;
+}
+
+// ── Tab switching ──
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('hidden', !p.id.endsWith(name)));
+}
+
+// ── Search ──
+let searchTimer = null;
+document.getElementById('search-input').addEventListener('input', e => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  if (!q) {
+    document.getElementById('tab-search').style.display = 'none';
+    if (document.querySelector('.tab[data-tab="search-results"]').classList.contains('active')) {
+      switchTab('conversation');
+    }
+    return;
+  }
+  searchTimer = setTimeout(async () => {
+    const results = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    renderSearchResults(results, q);
+  }, 300);
+});
+
+function renderSearchResults(results, query) {
+  document.getElementById('tab-search').style.display = 'block';
+  switchTab('search-results');
+  const container = document.getElementById('search-results-container');
+  if (!results.length) {
+    container.innerHTML = `<div class="empty-state" style="padding:40px;"><div class="icon">🔍</div><p>没有找到匹配 "${escHtml(query)}" 的结果</p></div>`;
+    return;
+  }
+  container.innerHTML = `<div class="section-title"><span class="emoji">🔍</span> 搜索结果: "${escHtml(query)}" (${results.length})</div>` +
+    results.map(r => `
+      <div class="search-result" onclick="selectSession('${r.session_id}')">
+        <div class="sr-session">Session: ${r.session_id.slice(0, 8)}</div>
+        <div>
+          <span class="sr-role" style="color:${r.role === 'user' ? 'var(--accent)' : r.role === 'assistant' ? 'var(--green)' : 'var(--orange)'}">${r.role}</span>
+          <span class="sr-content">${highlightMatch(escHtml(truncate(r.content, 120)), query)}</span>
+        </div>
+        <div class="sr-time">${formatTime(r.timestamp)}</div>
+      </div>
+    `).join('');
+}
+
+// ── Utilities ──
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function formatTime(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const diff = now - d;
+    if (diff < 60000) return '刚刚';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}天前`;
+    return iso.slice(0, 16).replace('T', ' ');
+  } catch(e) {
+    return iso;
+  }
+}
+
+function formatContent(text) {
+  if (!text) return '';
+  let html = escHtml(text);
+  // Basic markdown: **bold**, *italic*, `code`, ```code blocks```
+  html = html.replace(/```([\s\S]*?)```/g, '<pre>$1</pre>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  return html;
+}
+
+function truncate(s, max) {
+  if (!s || s.length <= max) return s || '';
+  return s.slice(0, max) + '…';
+}
+
+function highlightMatch(html, query) {
+  if (!query) return html;
+  const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  return html.replace(re, '<mark style="background:var(--orange);color:var(--bg-primary);padding:1px 2px;border-radius:2px;">$1</mark>');
+}
+
+// ── Boot ──
+init();
+</script>
+</body>
+</html>

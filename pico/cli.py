@@ -192,6 +192,18 @@ def _handle_slash_command(cmd: str, agent: AIAgent) -> str | None:
             lines.append(f"- **{name}** — {desc}")
         return "\n".join(lines)
 
+    if command == "/ui":
+        port = int(arg.strip()) if arg.strip().isdigit() else 8765
+        from pico.ui.server import start_ui
+        import threading
+        t = threading.Thread(
+            target=start_ui,
+            kwargs={"port": port, "open_browser": True},
+            daemon=True,
+        )
+        t.start()
+        return f"Dashboard started at http://127.0.0.1:{port}"
+
     return None
 
 
@@ -347,6 +359,37 @@ def _shortcut_infer(agent: AIAgent, args: argparse.Namespace) -> int:
     return _single_shot(agent, prompt)
 
 
+def _shortcut_ui(agent: AIAgent, args: argparse.Namespace) -> int:
+    """Shortcut: pico-agent ui [--port N] [--host ADDR] [--no-open]"""
+    host = args.host or "127.0.0.1"
+    port = args.port or 8765
+
+    from pico.ui.server import start_ui
+
+    start_ui(
+        host=host,
+        port=port,
+        db_path=str(agent.session.db_path) if hasattr(agent.session, "db_path") else None,
+        open_browser=not args.no_open,
+    )
+    return 0
+
+
+def _shortcut_monitor(agent: AIAgent, args: argparse.Namespace) -> int:
+    """Shortcut: pico-agent monitor [--port N] [--scan DIR ...] [--no-open]"""
+    port = args.port or 8766
+    scan_roots = args.scan if args.scan else None
+
+    from pico.ui.training_server import start_monitor
+
+    start_monitor(
+        port=port,
+        scan_roots=scan_roots,
+        open_browser=not args.no_open,
+    )
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Single-shot mode
 # ---------------------------------------------------------------------------
@@ -472,7 +515,7 @@ def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
 
-    KNOWN_COMMANDS = {"train", "eval", "search", "download", "clone", "infer"}
+    KNOWN_COMMANDS = {"train", "eval", "search", "download", "clone", "infer", "ui", "monitor"}
 
     # --- Manual global flag extraction (avoids argparse subparser issues) ---
     session_id_arg = ""
@@ -599,6 +642,10 @@ def main(argv: list[str] | None = None) -> None:
             exit_code = _shortcut_clone(agent, command_args)
         elif command == "infer" and command_args:
             exit_code = _shortcut_infer(agent, command_args)
+        elif command == "ui" and command_args:
+            exit_code = _shortcut_ui(agent, command_args)
+        elif command == "monitor" and command_args:
+            exit_code = _shortcut_monitor(agent, command_args)
         elif positional:
             message = " ".join(positional)
             exit_code = _single_shot(agent, message)
@@ -638,6 +685,8 @@ def _print_help() -> None:
         '  pico-agent download "coco 2017" --source huggingface\n'
         "  pico-agent clone https://github.com/user/repo --install\n"
         "  pico-agent infer best.pt image.jpg\n"
+        "  pico-agent ui                    Launch web dashboard\n"
+        "  pico-agent monitor               Launch training monitor\n"
         "\n"
         "SHORTCUT COMMANDS\n"
         "  train <dir>       Auto-detect dataset format and start YOLO training\n"
@@ -651,6 +700,10 @@ def _print_help() -> None:
         "  clone <url>       Clone a Git repository (pulls if already cloned)\n"
         "                    Options: --install to auto-detect and install deps\n"
         "  infer <model> <img>  Run inference on an image with a .pt model\n"
+        "  ui                 Launch web dashboard to visualize sessions\n"
+        "                     Options: --port, --host, --no-open\n"
+        "  monitor            Launch training monitor (scan for YOLO runs)\n"
+        "                     Options: --port, --scan <dirs>, --no-open\n"
         "\n"
         "REPL SHORTCUTS (inside interactive mode)\n"
         "  /help             Show in-REPL help\n"
@@ -659,6 +712,7 @@ def _print_help() -> None:
         "  /memory           Show persistent cross-session memory\n"
         "  /memory add <txt> Add an entry to persistent memory\n"
         "  /memory rm <key>  Remove memory entries matching keyword\n"
+        "  /ui [port]        Launch web dashboard (default port: 8765)\n"
         "  /quit, /exit      Exit the REPL (also: Ctrl+D)\n"
         "\n"
         "CONFIGURATION\n"
@@ -694,6 +748,14 @@ def _parse_command_args(command: str, args: list[str]) -> argparse.Namespace:
     elif command == "infer":
         parser.add_argument("model_path", help="Path to .pt model weights")
         parser.add_argument("image_path", help="Path to image file")
+    elif command == "ui":
+        parser.add_argument("--port", "-p", type=int, default=8765, help="Port number (default: 8765)")
+        parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+        parser.add_argument("--no-open", action="store_true", help="Don't auto-open browser")
+    elif command == "monitor":
+        parser.add_argument("--port", "-p", type=int, default=8766, help="Port number (default: 8766)")
+        parser.add_argument("--scan", nargs="*", help="Directories to scan for training runs")
+        parser.add_argument("--no-open", action="store_true", help="Don't auto-open browser")
 
     return parser.parse_args(args)
 
