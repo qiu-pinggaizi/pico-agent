@@ -121,6 +121,14 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,
 ::-webkit-scrollbar { width:7px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:var(--bg-3); border-radius:4px; }
+
+/* ── Lightbox ── */
+.lightbox { display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,.85); align-items:center; justify-content:center; cursor:zoom-out; }
+.lightbox.show { display:flex; }
+.lightbox img { max-width:95vw; max-height:95vh; border-radius:var(--r); box-shadow:0 0 40px rgba(0,0,0,.6); cursor:default; }
+.lightbox .lb-close { position:absolute; top:16px; right:20px; font-size:28px; color:#fff; cursor:pointer; opacity:.7; background:none; border:none; }
+.lightbox .lb-close:hover { opacity:1; }
+.lightbox .lb-name { position:absolute; bottom:20px; left:50%; transform:translateX(-50%); color:var(--t2); font-size:13px; background:var(--bg-2); padding:6px 16px; border-radius:var(--r); border:1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -190,6 +198,13 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,
       <div id="tb-placeholder" class="empty"><div class="icon">📉</div><h2>TensorBoard</h2><p>选择一个训练任务后点击 Start 启动 TensorBoard</p></div>
       <iframe id="tb-frame" class="tb-iframe" style="display:none"></iframe>
     </div>
+  </div>
+
+  <!-- Lightbox -->
+  <div class="lightbox" id="lightbox">
+    <button class="lb-close" id="lb-close">✕</button>
+    <img id="lb-img" src="" alt="">
+    <div class="lb-name" id="lb-name"></div>
   </div>
 </div>
 
@@ -449,7 +464,7 @@ function renderImages(run) {
   var baseUrl = '/api/runs/' + encodeURIComponent(run.id) + '/image/';
   grid.innerHTML = run.result_images.map(function(name) {
     var imgSrc = esc(baseUrl + encodeURIComponent(name));
-    return '<div class="img-card">' +
+    return '<div class="img-card" data-img="' + imgSrc + '" data-name="' + esc(name) + '" style="cursor:zoom-in">' +
       '<div class="img-wrap" style="position:relative;min-height:120px;background:var(--bg-3);display:flex;align-items:center;justify-content:center">' +
       '<img src="' + imgSrc + '" alt="' + esc(name) + '" style="max-width:100%;display:block" ' +
       'onload="this.parentNode.querySelector(\'.img-err\')&&(this.parentNode.querySelector(\'.img-err\').style.display=\'none\')" ' +
@@ -459,6 +474,36 @@ function renderImages(run) {
       '</div>' +
       '<div class="caption">' + esc(name) + '</div></div>';
   }).join('');
+}
+
+function initLightbox() {
+  var lb = document.getElementById('lightbox');
+  var lbImg = document.getElementById('lb-img');
+  var lbName = document.getElementById('lb-name');
+  document.getElementById('img-grid').addEventListener('click', function(e) {
+    var card = e.target.closest('.img-card');
+    if (!card) return;
+    lbImg.src = card.dataset.img;
+    lbName.textContent = card.dataset.name;
+    lb.classList.add('show');
+  });
+  document.getElementById('lb-close').addEventListener('click', function(e) {
+    e.stopPropagation();
+    lb.classList.remove('show');
+    lbImg.src = '';
+  });
+  lb.addEventListener('click', function(e) {
+    if (e.target === lb || e.target === lbImg) {
+      lb.classList.remove('show');
+      lbImg.src = '';
+    }
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && lb.classList.contains('show')) {
+      lb.classList.remove('show');
+      lbImg.src = '';
+    }
+  });
 }
 
 // ── TensorBoard ──
@@ -631,6 +676,7 @@ function switchTab(name) {
 
 // ── Start ──
 init();
+initLightbox();
 
 })();
 </script>
