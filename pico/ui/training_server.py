@@ -250,16 +250,60 @@ def _inspect_run_dir(run_dir: Path) -> dict[str, Any] | None:
             images.append(f.name)
     info["result_images"] = images
 
-    # Determine status
-    # If results.csv was modified in the last 60s, probably training
-    if time.time() - results_csv.stat().st_mtime < 60:
-        info["status"] = "running"
-    elif info.get("epochs_logged", 0) > 0:
-        info["status"] = "completed"
-    else:
-        info["status"] = "empty"
+    # Determine status — multi-signal active probe
+    info["status"] = _detect_run_status(run_dir, info.get("epochs_logged", 0))
 
     return info
+
+
+def _detect_run_status(run_dir: Path, epochs_logged: int) -> str:
+    """Detect whether a training run is still active.
+
+    Signals (any one triggers "running"):
+    1. results.csv or last.pt modified within last 5 minutes
+    2. Any running Python process references this run directory
+    3. A .nfs* lock file exists (NFS mounts)
+    """
+    _ACTIVE_WINDOW = 300  # 5 minutes
+    now = time.time()
+
+    # Signal 1: file mtime — results.csv or weight files recently updated
+    for check_file in [run_dir / "results.csv", run_dir / "weights" / "last.pt"]:
+        if check_file.exists() and now - check_file.stat().st_mtime < _ACTIVE_WINDOW:
+            return "running"
+
+    # Signal 2: process probe — scan /proc for any Python process
+    # that references this run directory (cmdline or CWD).
+    try:
+        run_resolved = str(run_dir.resolve())
+        run_parent = str(run_dir.parent.resolve())
+        for pid_dir in Path("/proc").iterdir():
+            if not pid_dir.name.isdigit():
+                continue
+            try:
+                # Check cmdline
+                cmdline_bytes = (pid_dir / "cmdline").read_bytes()
+                cmdline = cmdline_bytes.decode("utf-8", errors="replace").replace("\0", " ")
+                if run_resolved in cmdline:
+                    return "running"
+                # Check CWD — only for Python processes (fast filter)
+                if "python" in cmdline:
+                    cwd = (pid_dir / "cwd").resolve()
+                    if str(cwd).startswith(run_parent):
+                        return "running"
+            except (OSError, PermissionError, FileNotFoundError):
+                pass
+    except (OSError, PermissionError):
+        pass
+
+    # Signal 3: NFS lock files
+    for f in run_dir.iterdir():
+        if f.name.startswith(".nfs"):
+            return "running"
+
+    if epochs_logged > 0:
+        return "completed"
+    return "empty"
 
 
 # ======================================================================
