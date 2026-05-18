@@ -12,12 +12,14 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, unquote
 
 logger = logging.getLogger(__name__)
 
@@ -38,20 +40,50 @@ _CACHE_TTL = 10  # seconds
 # Run metadata (custom display name + notes)
 _META_PATH = Path.home() / ".pico-agent" / "monitor_meta.json"
 
+
 def _load_meta() -> dict[str, dict[str, str]]:
     """Load run metadata from disk. Returns {run_path: {name, notes}}."""
     try:
         if _META_PATH.exists():
             return json.loads(_META_PATH.read_text())
-    except Exception:
-        pass
+    except json.JSONDecodeError as e:
+        logger.warning("Corrupted monitor_meta.json: %s — starting fresh", e)
+    except OSError as e:
+        logger.warning("Cannot read monitor_meta.json: %s", e)
     return {}
 
+
 def _save_meta(meta: dict[str, dict[str, str]]) -> None:
+    """Atomic write: write to temp file, then rename."""
     _META_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    fd, tmp = tempfile.mkstemp(
+        dir=str(_META_PATH.parent), suffix=".tmp", prefix="meta_"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, str(_META_PATH))
+    except Exception:
+        # Clean up temp file on failure
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
 
 _meta_cache: dict[str, dict[str, str]] = {}
+
+
+# ======================================================================
+# Result image names (module-level constant)
+# ======================================================================
+
+_RESULT_IMAGE_NAMES = (
+    "confusion_matrix.png", "confusion_matrix_normalized.png",
+    "F1_curve.png", "PR_curve.png", "P_curve.png", "R_curve.png",
+    "results.png", "labels.jpg",
+)
 
 
 # ======================================================================
@@ -106,6 +138,58 @@ def _parse_yolo_results_csv_v2(csv_text: str) -> list[dict[str, Any]]:
         return _parse_yolo_results_csv(csv_text)
 
 
+# Process scan cache (avoids repeated /proc walks)
+_proc_cache: dict[str, set[str]] = {}  # {"cmdline_matches": set(), "cwd_matches": set()}
+_proc_cache_ts: float = 0
+_PROC_CACHE_TTL = 5  # seconds
+
+
+def _scan_processes_for_run(run_dir: Path) -> bool:
+    """Check if any running process references this run directory.
+
+    Scans /proc once and caches results for _PROC_CACHE_TTL seconds.
+    Returns True if a matching process is found.
+    """
+    global _proc_cache, _proc_cache_ts
+    now = time.time()
+
+    if now - _proc_cache_ts > _PROC_CACHE_TTL:
+        # Rebuild cache: scan /proc for all Python processes
+        cmdline_paths: set[str] = set()
+        cwd_python: set[str] = set()
+        try:
+            for pid_dir in Path("/proc").iterdir():
+                if not pid_dir.name.isdigit():
+                    continue
+                try:
+                    cmdline_bytes = (pid_dir / "cmdline").read_bytes()
+                    cmdline = cmdline_bytes.decode("utf-8", errors="replace").replace("\0", " ")
+                    # Record all paths mentioned in cmdline
+                    cmdline_paths.add(cmdline)
+                    # For Python processes, also record their CWD
+                    if "python" in cmdline.lower():
+                        cwd = (pid_dir / "cwd").resolve()
+                        cwd_python.add(str(cwd))
+                except (OSError, PermissionError, FileNotFoundError):
+                    pass
+        except (OSError, PermissionError):
+            pass
+
+        _proc_cache = {"cmdline_raw": cmdline_paths, "cwd_python": cwd_python}
+        _proc_cache_ts = now
+
+    run_resolved = str(run_dir.resolve())
+    # Check if any cmdline mentions this run dir
+    for cmdline in _proc_cache.get("cmdline_raw", set()):
+        if run_resolved in cmdline:
+            return True
+    # Check if any Python process CWD is exactly this run dir (not parent)
+    for cwd in _proc_cache.get("cwd_python", set()):
+        if cwd == run_resolved:
+            return True
+    return False
+
+
 def _scan_for_runs(scan_roots: list[str]) -> list[dict[str, Any]]:
     """Walk scan roots looking for YOLO training run directories.
 
@@ -126,7 +210,6 @@ def _scan_for_runs(scan_roots: list[str]) -> list[dict[str, Any]]:
         root_path = Path(root).expanduser()
         if not root_path.exists():
             continue
-        # Walk for results.csv files (depth-limited for performance)
         try:
             for results_csv in root_path.rglob("results.csv"):
                 run_dir = results_csv.parent
@@ -154,6 +237,9 @@ def _inspect_run_dir(run_dir: Path) -> dict[str, Any] | None:
     if not results_csv.exists():
         return None
 
+    # Single stat() call
+    csv_stat = results_csv.stat()
+
     info: dict[str, Any] = {
         "id": str(run_dir.resolve()),
         "name": run_dir.name,
@@ -161,9 +247,9 @@ def _inspect_run_dir(run_dir: Path) -> dict[str, Any] | None:
         "parent": str(run_dir.parent.resolve()),
         "modified": time.strftime(
             "%Y-%m-%d %H:%M:%S",
-            time.localtime(results_csv.stat().st_mtime),
+            time.localtime(csv_stat.st_mtime),
         ),
-        "modified_ts": results_csv.stat().st_mtime,
+        "modified_ts": csv_stat.st_mtime,
     }
 
     # Parse results.csv
@@ -186,13 +272,14 @@ def _inspect_run_dir(run_dir: Path) -> dict[str, Any] | None:
             # Best mAP
             map_key = "metrics/mAP50-95(B)"
             if map_key in rows[0]:
-                best_val = max(r.get(map_key, 0) for r in rows)
+                best_val = max((r.get(map_key, -float("inf")) for r in rows), default=0)
                 best_idx = max(range(len(rows)), key=lambda i: rows[i].get(map_key, 0))
-                info["best_mAP50-95"] = round(best_val, 6)
+                info["best_mAP50-95"] = round(best_val, 6) if best_val > -float("inf") else 0
                 info["best_epoch"] = best_idx + 1
             map50_key = "metrics/mAP50(B)"
             if map50_key in rows[0]:
-                info["best_mAP50"] = round(max(r.get(map50_key, 0) for r in rows), 6)
+                best_50 = max((r.get(map50_key, -float("inf")) for r in rows), default=0)
+                info["best_mAP50"] = round(best_50, 6) if best_50 > -float("inf") else 0
         info["results_data"] = rows
     except Exception as e:
         info["parse_error"] = str(e)
@@ -217,12 +304,13 @@ def _inspect_run_dir(run_dir: Path) -> dict[str, Any] | None:
         weights = []
         for f in sorted(weights_dir.iterdir()):
             if f.suffix == ".pt":
+                pt_stat = f.stat()
                 weights.append({
                     "name": f.name,
-                    "size_mb": round(f.stat().st_size / 1024 / 1024, 2),
+                    "size_mb": round(pt_stat.st_size / 1024 / 1024, 2),
                     "modified": time.strftime(
                         "%Y-%m-%d %H:%M:%S",
-                        time.localtime(f.stat().st_mtime),
+                        time.localtime(pt_stat.st_mtime),
                     ),
                 })
         info["weights"] = weights
@@ -232,17 +320,11 @@ def _inspect_run_dir(run_dir: Path) -> dict[str, Any] | None:
     info["has_tensorboard"] = len(events) > 0
     info["tensorboard_logdir"] = str(run_dir.resolve()) if events else ""
 
-    # Check for result images — all images YOLO training typically produces
-    _RESULT_IMAGE_NAMES = (
-        "confusion_matrix.png", "confusion_matrix_normalized.png",
-        "F1_curve.png", "PR_curve.png", "P_curve.png", "R_curve.png",
-        "results.png", "labels.jpg",
-    )
+    # Check for result images
     images = []
     for name in _RESULT_IMAGE_NAMES:
         if (run_dir / name).exists():
             images.append(name)
-    # Also pick up train_batch*.jpg and val_batch*.jpg
     for f in sorted(run_dir.iterdir()):
         if f.name not in images and (
             f.name.startswith("train_batch") or f.name.startswith("val_batch")
@@ -261,7 +343,7 @@ def _detect_run_status(run_dir: Path, epochs_logged: int) -> str:
 
     Signals (any one triggers "running"):
     1. results.csv or last.pt modified within last 5 minutes
-    2. Any running Python process references this run directory
+    2. Any running process references this run directory (cmdline or CWD)
     3. A .nfs* lock file exists (NFS mounts)
     """
     _ACTIVE_WINDOW = 300  # 5 minutes
@@ -272,38 +354,37 @@ def _detect_run_status(run_dir: Path, epochs_logged: int) -> str:
         if check_file.exists() and now - check_file.stat().st_mtime < _ACTIVE_WINDOW:
             return "running"
 
-    # Signal 2: process probe — scan /proc for any Python process
-    # that references this run directory (cmdline or CWD).
-    try:
-        run_resolved = str(run_dir.resolve())
-        run_parent = str(run_dir.parent.resolve())
-        for pid_dir in Path("/proc").iterdir():
-            if not pid_dir.name.isdigit():
-                continue
-            try:
-                # Check cmdline
-                cmdline_bytes = (pid_dir / "cmdline").read_bytes()
-                cmdline = cmdline_bytes.decode("utf-8", errors="replace").replace("\0", " ")
-                if run_resolved in cmdline:
-                    return "running"
-                # Check CWD — only for Python processes (fast filter)
-                if "python" in cmdline:
-                    cwd = (pid_dir / "cwd").resolve()
-                    if str(cwd).startswith(run_parent):
-                        return "running"
-            except (OSError, PermissionError, FileNotFoundError):
-                pass
-    except (OSError, PermissionError):
-        pass
+    # Signal 2: process probe (cached /proc scan)
+    if _scan_processes_for_run(run_dir):
+        return "running"
 
-    # Signal 3: NFS lock files
-    for f in run_dir.iterdir():
-        if f.name.startswith(".nfs"):
-            return "running"
+    # Signal 3: NFS lock files (use glob to avoid full iterdir)
+    if list(run_dir.glob(".nfs*")):
+        return "running"
 
     if epochs_logged > 0:
         return "completed"
     return "empty"
+
+
+# ======================================================================
+# Path security helper
+# ======================================================================
+
+def _is_within_roots(path: Path, scan_roots: list[str]) -> bool:
+    """Check that a resolved path is under one of the configured scan roots."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for root in scan_roots:
+        try:
+            root_resolved = Path(root).expanduser().resolve()
+            if resolved == root_resolved or str(resolved).startswith(str(root_resolved) + "/"):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 # ======================================================================
@@ -321,7 +402,6 @@ class _MonitorHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
-        qs = parse_qs(parsed.query)
 
         if path == "" or path == "/":
             self._serve_html()
@@ -411,8 +491,12 @@ class _MonitorHandler(BaseHTTPRequestHandler):
 
     def _api_get_run(self, run_path: str) -> None:
         # Decode the path (it was URL-encoded in the id)
-        decoded = run_path.replace("%2F", "/")
-        # Try to find in cache first
+        decoded = unquote(run_path)
+        # Security: validate path is within scan roots
+        if not _is_within_roots(Path(decoded), self.scan_roots):
+            self._json_response({"error": "Path not within scan roots"}, 403)
+            return
+        # Find in cache
         runs = _scan_for_runs(self.scan_roots)
         run = None
         for r in runs:
@@ -420,14 +504,11 @@ class _MonitorHandler(BaseHTTPRequestHandler):
                 run = r
                 break
         if run is None:
-            # Try direct inspection
-            p = Path(decoded)
-            if p.exists():
-                run = _inspect_run_dir(p)
-            if run is None:
-                self._json_response({"error": "Run not found"}, 404)
-                return
-        # Inject metadata
+            self._json_response({"error": "Run not found"}, 404)
+            return
+        # Inject metadata (reload fresh)
+        global _meta_cache
+        _meta_cache = _load_meta()
         meta = _meta_cache.get(run.get("path", ""), {})
         if meta.get("name"):
             run["original_name"] = run["name"]
@@ -452,6 +533,10 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         if not logdir:
             self._json_response({"error": "logdir is required"}, 400)
             return
+        # Security: validate logdir is within scan roots
+        if not _is_within_roots(Path(logdir), self.scan_roots):
+            self._json_response({"error": "logdir not within scan roots"}, 403)
+            return
         result = _start_tensorboard(logdir, int(port))
         self._json_response(result)
 
@@ -470,7 +555,6 @@ class _MonitorHandler(BaseHTTPRequestHandler):
 
     def _api_update_meta(self, run_id_encoded: str) -> None:
         """Update display name and/or notes for a run."""
-        from urllib.parse import unquote
         decoded = unquote(run_id_encoded)
         body = self._read_body()
         if not body:
@@ -479,12 +563,17 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         global _meta_cache
         _meta_cache = _load_meta()
         path = decoded
-        # Find actual path from runs
+        # Find actual path from runs — must exist in scan results
         runs = _scan_for_runs(self.scan_roots)
+        found = False
         for r in runs:
             if r["id"] == decoded or r["path"] == decoded:
                 path = r["path"]
+                found = True
                 break
+        if not found:
+            self._json_response({"error": "Run not found in scan results"}, 404)
+            return
         entry = _meta_cache.get(path, {})
         if "name" in body:
             entry["name"] = str(body["name"])[:200]
@@ -496,11 +585,12 @@ class _MonitorHandler(BaseHTTPRequestHandler):
 
     def _api_delete_run(self, run_id_encoded: str) -> None:
         """Delete a training run directory and remove it from cache."""
-        from urllib.parse import unquote
-        import shutil
         decoded = unquote(run_id_encoded)
-        # Security: verify the path exists and looks like a training run
         target = Path(decoded)
+        # Security: must be within scan roots
+        if not _is_within_roots(target, self.scan_roots):
+            self._json_response({"error": "Path not within scan roots"}, 403)
+            return
         if not target.exists() or not target.is_dir():
             self._json_response({"error": "Run directory not found"}, 404)
             return
@@ -511,23 +601,31 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         try:
             shutil.rmtree(str(target))
             # Remove from cache
-            global _run_cache, _cache_ts
+            global _run_cache, _cache_ts, _meta_cache
             _run_cache = [r for r in _run_cache if r.get("id") != decoded and r.get("path") != decoded]
             _cache_ts = 0  # force rescan on next request
+            # Remove from metadata
+            resolved = str(target.resolve())
+            if resolved in _meta_cache:
+                del _meta_cache[resolved]
+                _save_meta(_meta_cache)
             self._json_response({"success": True, "deleted": decoded})
         except Exception as e:
+            logger.error("Failed to delete %s: %s", decoded, e)
             self._json_response({"error": f"Failed to delete: {e}"}, 500)
 
     def _api_open_run_dir(self, run_id_encoded: str) -> None:
         """Open run directory in system file manager."""
-        from urllib.parse import unquote
         decoded = unquote(run_id_encoded)
         target = Path(decoded)
+        # Security: must be within scan roots
+        if not _is_within_roots(target, self.scan_roots):
+            self._json_response({"error": "Path not within scan roots"}, 403)
+            return
         if not target.exists() or not target.is_dir():
             self._json_response({"error": "Directory not found"}, 404)
             return
         try:
-            import shutil
             if shutil.which("xdg-open"):
                 subprocess.Popen(["xdg-open", str(target)],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -543,7 +641,6 @@ class _MonitorHandler(BaseHTTPRequestHandler):
 
     def _api_serve_image(self, run_id: str, filename: str) -> None:
         """Serve result images (confusion_matrix.png, etc.) from run directory."""
-        from urllib.parse import unquote
         decoded_id = unquote(run_id)
         decoded_name = unquote(filename)
         runs = _scan_for_runs(self.scan_roots)
@@ -570,6 +667,16 @@ class _MonitorHandler(BaseHTTPRequestHandler):
             self._json_response({"error": "Image not allowed"}, 403)
             return
         img_path = Path(run["path"]) / decoded_name
+        # Security: verify resolved path stays within the run directory
+        try:
+            resolved = img_path.resolve()
+            run_resolved = Path(run["path"]).resolve()
+            if not str(resolved).startswith(str(run_resolved) + "/"):
+                self._json_response({"error": "Path traversal detected"}, 403)
+                return
+        except OSError:
+            self._json_response({"error": "Invalid path"}, 400)
+            return
         if not img_path.exists():
             self._json_response({"error": "Image not found"}, 404)
             return
@@ -600,13 +707,16 @@ class _MonitorHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_body(self) -> dict:
+    def _read_body(self, max_bytes: int = 1_048_576) -> dict:
+        """Read and parse JSON body. Caps at max_bytes (default 1MB)."""
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
+            return {}
+        if length > max_bytes:
+            self._json_response({"error": "Request body too large"}, 413)
             return {}
         raw = self.rfile.read(length)
         try:
@@ -623,11 +733,16 @@ _tb_process: subprocess.Popen | None = None
 _tb_port: int = 6006
 _tb_logdir: str = ""
 
+# Cache tensorboard availability (it's not going to install/uninstall mid-run)
+_tb_available_cache: bool | None = None
+
 
 def _tb_is_available() -> bool:
-    """Check if tensorboard binary is accessible."""
-    import shutil
-    return shutil.which("tensorboard") is not None
+    """Check if tensorboard binary is accessible (cached)."""
+    global _tb_available_cache
+    if _tb_available_cache is None:
+        _tb_available_cache = shutil.which("tensorboard") is not None
+    return _tb_available_cache
 
 
 def _get_tensorboard_info() -> dict[str, Any]:
@@ -705,6 +820,9 @@ def start_monitor(
     """
     roots = scan_roots or _DEFAULT_SCAN_ROOTS
 
+    if host != "127.0.0.1":
+        logger.warning("Binding to %s — all endpoints are unauthenticated!", host)
+
     _MonitorHandler.scan_roots = roots
     HTTPServer.allow_reuse_address = True
     try:
@@ -735,12 +853,17 @@ def start_monitor(
 
 
 if __name__ == "__main__":
-    import argparse as _ap
+    import argparse
 
-    _p = _ap.ArgumentParser(description="Pico Training Monitor")
+    _p = argparse.ArgumentParser(description="Pico Training Monitor")
     _p.add_argument("--port", "-p", type=int, default=8766)
     _p.add_argument("--scan", nargs="*", help="Directories to scan")
     _p.add_argument("--host", default="127.0.0.1")
     _p.add_argument("--no-open", action="store_true")
     _a = _p.parse_args()
-    start_monitor(host=_a.host, port=_a.port, scan_roots=_a.scan or None, open_browser=not _a.no_open)
+    start_monitor(
+        host=_a.host,
+        port=_a.port,
+        scan_roots=_a.scan or None,
+        open_browser=not _a.no_open,
+    )

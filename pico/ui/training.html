@@ -308,6 +308,8 @@ function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(async function() {
     if (!document.getElementById('auto-refresh').checked) return;
+    // Pause refresh when page is hidden (Page Visibility API)
+    if (document.hidden) return;
     try {
       runs = await api('/api/runs');
       renderRunList(runs);
@@ -343,8 +345,8 @@ function renderRunList(list) {
     var map5095 = r['best_mAP50-95'] != null ? r['best_mAP50-95'] : (m['metrics/mAP50-95(B)'] || '-');
     var isActive = currentRun && currentRun.id === r.id;
     html += '<div class="run-card' + (isActive ? ' active' : '') + '" data-idx="' + i + '">' +
-      '<div class="rc-top"><span class="rc-name">' + esc(r.name) + '</span><span class="badge ' + r.status + '">' + r.status + '</span></div>' +
-      '<div class="rc-meta"><span>' + r.epochs_logged + ' epochs</span><span>' + r.modified + '</span></div>' +
+      '<div class="rc-top"><span class="rc-name">' + esc(r.name) + '</span><span class="badge ' + esc(r.status) + '">' + esc(r.status) + '</span></div>' +
+      '<div class="rc-meta"><span>' + r.epochs_logged + ' epochs</span><span>' + esc(r.modified) + '</span></div>' +
       '<div class="rc-metrics"><span class="rc-metric">mAP50: <b>' + fmt(map50) + '</b></span>' +
       '<span class="rc-metric">mAP50-95: <b>' + fmt(map5095) + '</b></span></div>' +
       (r.notes ? '<div class="rc-notes">📝 ' + esc(r.notes) + '</div>' : '') + '</div>';
@@ -614,22 +616,31 @@ function updateTBUI(info) {
 async function startTB() {
   var logdir = currentRun ? currentRun.path : '';
   if (!logdir) { alert('请先选择一个训练任务'); return; }
-  var result = await api('/api/tensorboard/start', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({logdir: logdir, port: 6006})
-  });
-  if (result.success) {
-    updateTBUI({running: true, port: result.port, url: result.url, available: true});
-    document.getElementById('tb-frame').src = result.url;
-    document.getElementById('tb-frame').style.display = 'block';
-    document.getElementById('tb-placeholder').style.display = 'none';
-  } else {
-    // Show friendly error in placeholder instead of alert
-    var ph = document.getElementById('tb-placeholder');
-    ph.querySelector('.icon').textContent = '⚠️';
-    ph.querySelector('h2').textContent = '启动失败';
-    ph.querySelector('p').textContent = result.error || '未知错误';
-    ph.style.display = 'flex';
+  var btn = document.getElementById('tb-start-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 启动中...';
+  try {
+    var result = await api('/api/tensorboard/start', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({logdir: logdir, port: 6006})
+    });
+    if (result.success) {
+      updateTBUI({running: true, port: result.port, url: result.url, available: true});
+      document.getElementById('tb-frame').src = result.url;
+      document.getElementById('tb-frame').style.display = 'block';
+      document.getElementById('tb-placeholder').style.display = 'none';
+    } else {
+      var ph = document.getElementById('tb-placeholder');
+      ph.querySelector('.icon').textContent = '⚠️';
+      ph.querySelector('h2').textContent = '启动失败';
+      ph.querySelector('p').textContent = result.error || '未知错误';
+      ph.style.display = 'flex';
+    }
+  } catch(e) {
+    console.error('TensorBoard start failed:', e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶️ Start';
   }
 }
 
@@ -681,9 +692,19 @@ async function saveMeta() {
 }
 
 async function rescan() {
-  await api('/api/scan');
-  runs = await api('/api/runs');
-  renderRunList(runs);
+  var btn = document.getElementById('btn-rescan');
+  btn.disabled = true;
+  btn.textContent = '⏳ 扫描中...';
+  try {
+    await api('/api/scan');
+    runs = await api('/api/runs');
+    renderRunList(runs);
+  } catch(e) {
+    console.error('Rescan failed:', e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 Rescan';
+  }
 }
 
 // ── Copy path ──
@@ -733,7 +754,10 @@ function openDir() {
 async function deleteRun() {
   if (!currentRun) return;
   var name = currentRun.name || currentRun.path;
-  if (!confirm('确定要删除实验「' + name + '」吗？\n\n此操作将删除整个目录，无法恢复！\n\n' + (currentRun.path || currentRun.id))) return;
+  if (!confirm('确定要删除实验「' + name.replace(/[<>"'&]/g, '') + '」吗？\n\n此操作将删除整个目录，无法恢复！\n\n' + (currentRun.path || currentRun.id))) return;
+  var btn = document.getElementById('btn-delete-run');
+  btn.disabled = true;
+  btn.textContent = '⏳ 删除中...';
   try {
     var result = await api('/api/runs/' + encodeURIComponent(currentRun.id), {method: 'DELETE'});
     if (result.success) {
@@ -754,6 +778,9 @@ async function deleteRun() {
     }
   } catch(e) {
     alert('删除失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🗑️ 删除';
   }
 }
 
