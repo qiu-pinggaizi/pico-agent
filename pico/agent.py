@@ -208,7 +208,15 @@ class AIAgent:
             "- Show progress: 'Downloading dataset...' → 'Setting up...' → 'Training started!'\n"
             "- After any major task, summarize what was done and suggest next steps.\n"
             "- If something fails, suggest fixes rather than just reporting the error.\n"
-            "- Use dry_run=true for destructive operations first if unsure.",
+            "- Use dry_run=true for destructive operations first if unsure.\n\n"
+            "## Data Integrity (CRITICAL)\n"
+            "- NEVER fabricate, hallucinate, or invent data that was not returned by a tool.\n"
+            "- If a tool returns an error, 'success: false', or empty output, you MUST:\n"
+            "  1. Report the exact error message to the user.\n"
+            "  2. Do NOT make up plausible-looking results (metrics, GPU info, file lists, etc.).\n"
+            "  3. Do NOT assume the operation succeeded just because you expected it to.\n"
+            "- If a tool call times out or the connection fails, say so explicitly.\n"
+            "- It is ALWAYS better to say 'I could not get this data' than to fabricate it.",
         )
 
         memory_content = self.memory.load()
