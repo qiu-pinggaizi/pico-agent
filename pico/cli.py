@@ -138,6 +138,14 @@ def _handle_slash_command(cmd: str, agent: AIAgent) -> str | None:
             "- `/memory` — Show persistent memory\n"
             "- `/memory add <text>` — Add a memory entry\n"
             "- `/memory rm <keyword>` — Remove memory entries\n\n"
+            "**Knowledge:**\n"
+            "- `/kb` — Show training knowledge base summary\n"
+            "- `/kb best [task]` — Show best training run\n"
+            "- `/kb list [task]` — List recent training runs\n\n"
+            "**Diagnostics:**\n"
+            "- `/doctor` — Health check (API, config, tools, disk)\n"
+            "- `/model [name]` — Show or switch LLM model\n"
+            "- `/tokenjuice` — Show compression rules\n\n"
             "**Tools:**\n"
             "- `/tools` — List available tools\n\n"
             "**UI:**\n"
@@ -246,6 +254,148 @@ def _handle_slash_command(cmd: str, agent: AIAgent) -> str | None:
         )
         t.start()
         return f"Dashboard started at http://127.0.0.1:{port}"
+
+    if command == "/monitor":
+        port = int(arg.strip()) if arg.strip().isdigit() else 8766
+        from pico.ui.training_server import start_monitor
+        import threading
+        t = threading.Thread(
+            target=start_monitor,
+            kwargs={"port": port, "open_browser": True},
+            daemon=True,
+        )
+        t.start()
+        return f"Training monitor started at http://127.0.0.1:{port}"
+
+    # ---- /doctor: Health check ----
+    if command == "/doctor":
+        import shutil
+        checks: list[str] = []
+        # 1. API key
+        if agent.config.api_key:
+            masked = agent.config.api_key[:4] + "..." + agent.config.api_key[-4:] if len(agent.config.api_key) > 8 else "***"
+            checks.append(f"✅ API key configured ({masked})")
+        else:
+            checks.append("❌ No API key set — set OPENAI_API_KEY or edit ~/.pico-agent/config.yaml")
+        # 2. Provider / model
+        checks.append(f"✅ Provider: {agent.config.provider} | Model: {agent.config.model}")
+        # 3. Base URL
+        checks.append(f"✅ Base URL: {agent.config.base_url}")
+        # 4. YOLO
+        yolo_path = shutil.which("yolo")
+        if yolo_path:
+            checks.append(f"✅ YOLO CLI: {yolo_path}")
+        else:
+            checks.append("⚠️ YOLO CLI not in PATH (install with: pip install ultralytics)")
+        # 5. SSH (paramiko)
+        try:
+            import paramiko  # noqa: F401
+            checks.append("✅ paramiko (SSH) available")
+        except ImportError:
+            checks.append("⚠️ paramiko not installed (remote features disabled)")
+        # 6. Tools count
+        tool_count = len(agent.tools.get_schemas())
+        checks.append(f"✅ {tool_count} tools registered")
+        # 7. Disk space
+        try:
+            import shutil as sh
+            usage = sh.disk_usage(str(Path.home()))
+            free_gb = usage.free / (1024**3)
+            if free_gb < 5:
+                checks.append(f"⚠️ Low disk space: {free_gb:.1f} GB free")
+            else:
+                checks.append(f"✅ Disk space: {free_gb:.1f} GB free")
+        except Exception:
+            checks.append("⚠️ Could not check disk space")
+        # 8. TokenJuice
+        rules_count = len(agent.tokenjuice.rules)
+        checks.append(f"✅ TokenJuice: {rules_count} compression rules active")
+        # 9. Training KB
+        try:
+            kb_count = len(agent.training_kb.list_runs(limit=1000))
+            checks.append(f"✅ Training KB: {kb_count} runs recorded")
+        except Exception as e:
+            checks.append(f"⚠️ Training KB error: {e}")
+        # 10. Sessions
+        if isinstance(agent.session, SessionStore):
+            stats = agent.session.get_stats() if hasattr(agent.session, 'get_stats') else {}
+            checks.append(f"✅ Sessions DB: {stats.get('total_sessions', '?')} sessions, {stats.get('total_messages', '?')} messages")
+
+        return "# Health Check\n\n" + "\n".join(checks)
+
+    # ---- /model: Show or switch model ----
+    if command == "/model":
+        if not arg:
+            return (
+                f"# Current Model\n\n"
+                f"- **Provider**: {agent.config.provider}\n"
+                f"- **Model**: `{agent.config.model}`\n"
+                f"- **Base URL**: {agent.config.base_url}\n"
+                f"- **Max tokens**: {agent.config.max_tokens:,}\n"
+                f"- **Temperature**: {agent.config.temperature}\n\n"
+                f"Switch with: `/model <model_name>`\n"
+                f"Example: `/model gpt-4o` or `/model deepseek-chat`"
+            )
+        # Switch model at runtime
+        new_model = arg.strip()
+        old_model = agent.config.model
+        agent.config.data.setdefault("model", {})["model"] = new_model
+        # Recreate LLM provider with new model
+        try:
+            from pico.llm import create_provider
+            agent.llm = create_provider(agent.config)
+            agent.compressor.llm = agent.llm
+            return f"✅ Switched model: `{old_model}` → `{new_model}`"
+        except Exception as e:
+            # Rollback
+            agent.config.data["model"]["model"] = old_model
+            return f"❌ Failed to switch to `{new_model}`: {e}"
+
+    # ---- /kb: Training Knowledge Base ----
+    if command == "/kb":
+        if arg.startswith("best"):
+            task = arg[4:].strip()
+            run = agent.training_kb.get_best_run(task=task)
+            if not run:
+                return f"No training runs found{' for task ' + task if task else ''}."
+            return (
+                f"# Best Training Run\n\n"
+                f"- **Task**: {run.task or 'untitled'}\n"
+                f"- **Model**: {run.model_arch}\n"
+                f"- **mAP50**: {run.map50:.3f}\n"
+                f"- **mAP50-95**: {run.map50_95:.3f}\n"
+                f"- **Precision**: {run.precision_:.3f}\n"
+                f"- **Recall**: {run.recall_:.3f}\n"
+                f"- **Epochs**: {run.epochs}\n"
+                f"- **Dataset**: {run.dataset_name or run.dataset_path}\n"
+                f"- **Weights**: `{run.best_weights}`\n"
+            )
+        if arg.startswith("list"):
+            task = arg[4:].strip()
+            runs = agent.training_kb.list_runs(task=task)
+            if not runs:
+                return f"No training runs found{' for task ' + task if task else ''}."
+            lines = [f"# Training Runs{' — ' + task if task else ''}\n"]
+            for r in runs:
+                from datetime import datetime
+                ts = datetime.fromtimestamp(r.timestamp).strftime("%Y-%m-%d %H:%M")
+                lines.append(
+                    f"- `{ts}` **{r.task or 'untitled'}** ({r.model_arch}) — "
+                    f"mAP50={r.map50:.3f}, mAP50-95={r.map50_95:.3f} | {r.epochs}ep"
+                )
+            return "\n".join(lines)
+        # Default: summary
+        return agent.training_kb.summary_text()
+
+    # ---- /tokenjuice: Show compression rules ----
+    if command == "/tokenjuice":
+        return (
+            f"# TokenJuice Compression\n\n"
+            f"**Status**: {'✅ Enabled' if agent.tokenjuice.enabled else '❌ Disabled'}\n\n"
+            f"```\n{agent.tokenjuice.get_rules_summary()}\n```\n\n"
+            f"Custom rules: `~/.pico-agent/tokenjuice/rules/*.json`\n"
+            f"Project rules: `.pico-agent/tokenjuice/rules/*.json`"
+        )
 
     return None
 

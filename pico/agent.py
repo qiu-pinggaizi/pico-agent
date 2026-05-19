@@ -20,6 +20,7 @@ from pico.config import Config
 from pico.llm import LLMProvider, create_provider, estimate_cost
 from pico.memory import Memory, NoMemory
 from pico.session import MemorylessSession, SessionStore
+from pico.tokenjuice import TokenJuice
 from pico.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -81,8 +82,13 @@ class AIAgent:
             max_tokens=config.max_tokens,
             threshold=config.compression_threshold,
         )
+        # TokenJuice: rule-based tool output compression (inspired by OpenHuman)
+        self.tokenjuice = TokenJuice(enabled=True)
         # Interrupt flag for graceful shutdown (set by CLI on Ctrl+C)
         self._interrupt_requested = False
+        # Training knowledge base (structured training memory)
+        from pico.training_kb import TrainingKB
+        self.training_kb = TrainingKB()
 
     # ------------------------------------------------------------------
     # public API
@@ -170,6 +176,8 @@ class AIAgent:
                 for tc in response.tool_calls:
                     logger.info("Tool call: %s(%s)", tc.name, tc.arguments)
                     result = self._dispatch_tool_with_timeout(tc.name, tc.arguments)
+                    # TokenJuice: compress tool output before it enters context
+                    result = self.tokenjuice.compress(tc.name, result)
                     tool_msg = {
                         "role": "tool",
                         "tool_call_id": tc.id,
