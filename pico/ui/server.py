@@ -160,7 +160,23 @@ class _APIHandler(BaseHTTPRequestHandler):
             return
         store = self._get_store()
         results = store.search_messages(query, limit=50)
-        self._json_response([self._msg_dict(m) for m in results])
+        # search_messages returns dicts (not MessageRecord) since FTS5 upgrade
+        out = []
+        for m in results:
+            if isinstance(m, dict):
+                d = {
+                    "id": m.get("id", ""),
+                    "session_id": m.get("session_id", ""),
+                    "role": m.get("role", ""),
+                    "content": m.get("content", ""),
+                    "timestamp": m.get("timestamp", ""),
+                }
+                if m.get("snippet"):
+                    d["snippet"] = m["snippet"]
+            else:
+                d = self._msg_dict(m)
+            out.append(d)
+        self._json_response(out)
 
     # ------------------------------------------------------------------
     # helpers

@@ -10,6 +10,7 @@ and provides methods to:
 
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
 import json
@@ -17,6 +18,37 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+
+# ---------------------------------------------------------------------------
+# AST-based pre-filter (from Hermes Agent pattern)
+# ---------------------------------------------------------------------------
+
+def _is_registry_register_call(node: ast.AST) -> bool:
+    """Return True when *node* is a ``registry.register(...)`` call expression."""
+    if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+        return False
+    func = node.value.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "register"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "registry"
+    )
+
+
+def _module_registers_tools(module_path: Path) -> bool:
+    """Return True when the module contains a top-level ``registry.register()`` call.
+
+    Only inspects module-body statements so that helper modules which happen
+    to call ``registry.register()`` inside a function are not picked up.
+    """
+    try:
+        source = module_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(module_path))
+    except (OSError, SyntaxError):
+        return False
+    return any(_is_registry_register_call(stmt) for stmt in tree.body)
 
 logger = logging.getLogger(__name__)
 
@@ -213,9 +245,14 @@ class ToolRegistry:
 
         logger.debug("Discovering tools in %s", tools_dir)
 
-        # 1. Register direct .py modules
+        # 1. Register direct .py modules (AST pre-filter: only import modules
+        #    that actually contain registry.register() calls at module level)
         for mod_path in sorted(tools_dir.glob("*.py")):
             if mod_path.name.startswith("_"):
+                continue
+
+            if not _module_registers_tools(mod_path):
+                logger.debug("Skipping %s (no registry.register() calls)", mod_path.name)
                 continue
 
             module_name = f"pico.tools.{mod_path.stem}"

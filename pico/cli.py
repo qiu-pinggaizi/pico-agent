@@ -130,13 +130,19 @@ def _handle_slash_command(cmd: str, agent: AIAgent) -> str | None:
             "# Pico Agent Commands\n\n"
             "**Session:**\n"
             "- `/new` — Start a new session\n"
-            "- `/sessions` — List recent sessions\n\n"
+            "- `/sessions` — List recent sessions\n"
+            "- `/compact` — Compress context to save tokens\n"
+            "- `/clear` — Clear screen + start new session\n"
+            "- `/usage` — Show token usage and cost for current session\n\n"
             "**Memory:**\n"
             "- `/memory` — Show persistent memory\n"
             "- `/memory add <text>` — Add a memory entry\n"
             "- `/memory rm <keyword>` — Remove memory entries\n\n"
             "**Tools:**\n"
             "- `/tools` — List available tools\n\n"
+            "**UI:**\n"
+            "- `/ui [port]` — Launch web dashboard\n"
+            "- `/monitor [port]` — Launch training monitor\n\n"
             "**Quick Actions:**\n"
             "- Just describe what you want to do! The agent will figure out the tools.\n"
             "  Examples:\n"
@@ -191,6 +197,43 @@ def _handle_slash_command(cmd: str, agent: AIAgent) -> str | None:
             desc = s.get("description", "No description").split("\n")[0]
             lines.append(f"- **{name}** — {desc}")
         return "\n".join(lines)
+
+    if command == "/compact":
+        from pico.compression import _messages_token_count
+        if isinstance(agent.session, SessionStore) and agent.session_id:
+            msgs = agent.session.get_messages_as_dicts(agent.session_id)
+            msgs = [m for m in msgs if m["role"] != "system"]
+            before = _messages_token_count(msgs)
+            compressed = agent.compressor.maybe_compress(msgs)
+            after = _messages_token_count(compressed)
+            return f"Compressed: {before} → {after} tokens ({before - after} saved, {len(msgs)} → {len(compressed)} messages)"
+        return "Compression not available in memoryless mode."
+
+    if command == "/clear":
+        import os
+        os.system("clear" if os.name == "posix" else "cls")
+        old_id = agent.session_id
+        agent.session_id = ""
+        return f"Screen cleared. Started new session (was: {old_id[:8] if old_id else 'none'})"
+
+    if command == "/usage":
+        if isinstance(agent.session, SessionStore) and agent.session_id:
+            sess = agent.session.get_session(agent.session_id)
+            if sess:
+                lines = [
+                    "# Session Usage\n",
+                    f"- **Session**: `{sess.id[:8]}` — {sess.title}",
+                    f"- **Messages**: {sess.message_count}",
+                    f"- **API calls**: {sess.api_call_count}",
+                    f"- **Input tokens**: {sess.input_tokens:,}",
+                    f"- **Output tokens**: {sess.output_tokens:,}",
+                    f"- **Cache read**: {sess.cache_read_tokens:,}",
+                    f"- **Est. cost**: ${sess.estimated_cost_usd:.4f}",
+                    f"- **Source**: {sess.source}",
+                ]
+                return "\n".join(lines)
+            return "No active session."
+        return "Usage tracking not available in memoryless mode."
 
     if command == "/ui":
         port = int(arg.strip()) if arg.strip().isdigit() else 8765

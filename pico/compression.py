@@ -23,9 +23,13 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-def _messages_token_count(messages: list[dict[str, Any]]) -> int:
-    """Sum estimated tokens over all messages, including tool_calls."""
+def _messages_token_count(messages: list[dict[str, Any]], tool_schemas: list[dict] | None = None) -> int:
+    """Sum estimated tokens over all messages, including tool_calls and schemas."""
     total = 0
+    # Account for tool schemas in context (they're sent every turn)
+    if tool_schemas:
+        for schema in tool_schemas:
+            total += _estimate_tokens(str(schema))
     for msg in messages:
         content = msg.get("content", "")
         if isinstance(content, str):
@@ -118,8 +122,14 @@ class ContextCompressor:
 
         transcript = "\n".join(conversation_lines)
         prompt = (
-            "Summarize the following conversation concisely in English. "
-            "Keep important facts, decisions, and action items. "
+            "Summarize the following conversation concisely. "
+            "CRITICAL: Preserve ALL tool results, file paths, numbers, "
+            "error messages, and key decisions. "
+            "Structure your summary with these sections:\n"
+            "- Goal: what the user wanted\n"
+            "- Actions: what tools were called and their results\n"
+            "- Key Facts: numbers, paths, configurations discovered\n"
+            "- Status: what was completed, what's pending\n\n"
             "Do not add extra commentary — output only the summary.\n\n"
             f"Conversation:\n{transcript}"
         )

@@ -110,6 +110,41 @@ def _call_with_retry(fn, *, max_retries: int = 3, base_delay: float = 1.0):
     raise last_exc  # type: ignore[misc]
 
 
+MODEL_PRICING: dict[str, tuple[float, float]] = {
+    # model_prefix: (input_per_mtok, output_per_mtok) in USD
+    "claude-sonnet": (3.0, 15.0),
+    "claude-opus": (15.0, 75.0),
+    "claude-haiku": (0.8, 4.0),
+    "gpt-4o-mini": (0.15, 0.6),
+    "gpt-4o": (2.5, 10.0),
+    "deepseek": (0.27, 1.1),
+    "qwen": (0.3, 0.6),
+}
+
+
+def estimate_cost(model: str, usage: dict[str, int]) -> float:
+    """Estimate cost in USD from model name and token usage dict.
+
+    Args:
+        model: Model name/identifier.
+        usage: Dict with ``prompt_tokens`` and ``completion_tokens`` keys.
+
+    Returns:
+        Estimated cost in USD.
+    """
+    input_tokens = usage.get("prompt_tokens", 0)
+    output_tokens = usage.get("completion_tokens", 0)
+    model_lower = model.lower()
+    input_rate = 1.0
+    output_rate = 3.0
+    for prefix, (in_price, out_price) in MODEL_PRICING.items():
+        if prefix in model_lower:
+            input_rate = in_price
+            output_rate = out_price
+            break
+    return (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000
+
+
 class OpenAIProvider(LLMProvider):
     """OpenAI-compatible LLM provider.
 
@@ -121,6 +156,7 @@ class OpenAIProvider(LLMProvider):
         self.model = model
         self.api_key = api_key
         self.base_url = base_url
+        self._client: Any = None
 
     def chat(
         self,
@@ -128,9 +164,10 @@ class OpenAIProvider(LLMProvider):
         tools: list[dict[str, Any]] | None = None,
         system: str | None = None,
     ) -> LLMResponse:
-        from openai import OpenAI
+        if self._client is None:
+            from openai import OpenAI
 
-        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
         # Build message list with system prompt
         api_messages: list[dict[str, Any]] = []
@@ -151,7 +188,7 @@ class OpenAIProvider(LLMProvider):
         logger.debug("OpenAI chat request: model=%s, messages=%d, tools=%d",
                       self.model, len(api_messages), len(tools or []))
 
-        response = _call_with_retry(lambda: client.chat.completions.create(**kwargs))
+        response = _call_with_retry(lambda: self._client.chat.completions.create(**kwargs))
         choice = response.choices[0]
 
         # Parse tool calls
@@ -195,6 +232,7 @@ class AnthropicProvider(LLMProvider):
         self.api_key = api_key
         self.base_url = base_url
         self.max_tokens = max_tokens
+        self._client: Any = None
 
     def _convert_tools_for_anthropic(
         self, tools: list[dict[str, Any]]
@@ -272,12 +310,13 @@ class AnthropicProvider(LLMProvider):
         tools: list[dict[str, Any]] | None = None,
         system: str | None = None,
     ) -> LLMResponse:
-        import anthropic
+        if self._client is None:
+            import anthropic
 
-        client = anthropic.Anthropic(
-            api_key=self.api_key,
-            base_url=self.base_url if self.base_url else None,
-        )
+            self._client = anthropic.Anthropic(
+                api_key=self.api_key,
+                base_url=self.base_url if self.base_url else None,
+            )
 
         # Build system prompt from separate param and messages
         all_system_parts: list[str] = []
@@ -332,7 +371,7 @@ class AnthropicProvider(LLMProvider):
         logger.debug("Anthropic chat request: model=%s, messages=%d, tools=%d",
                       self.model, len(converted_messages), len(tools or []))
 
-        response = _call_with_retry(lambda: client.messages.create(**kwargs))
+        response = _call_with_retry(lambda: self._client.messages.create(**kwargs))
 
         content_text = ""
         tool_calls: list[ToolCall] = []

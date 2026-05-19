@@ -9,16 +9,45 @@ The AIAgent drives the LLM ↔ tool-call cycle:
 from __future__ import annotations
 
 import logging
+import signal
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any
 
 from pico.compression import ContextCompressor
 from pico.config import Config
-from pico.llm import LLMProvider, create_provider
+from pico.llm import LLMProvider, create_provider, estimate_cost
 from pico.memory import Memory, NoMemory
 from pico.session import MemorylessSession, SessionStore
 from pico.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+# Default timeout for individual tool calls (seconds)
+DEFAULT_TOOL_TIMEOUT = 300
+
+
+def _validate_message_roles(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ensure message role alternation (never two assistant or two user in a row).
+
+    Consecutive messages with the same role (excluding 'tool') are merged
+    by concatenating their content. This prevents API errors from role violations.
+    """
+    if not messages:
+        return messages
+    cleaned: list[dict[str, Any]] = [messages[0]]
+    for msg in messages[1:]:
+        prev = cleaned[-1]
+        # Tool messages can repeat (multiple tool results after one assistant call)
+        if msg["role"] == "tool" or prev["role"] == "tool":
+            cleaned.append(msg)
+        elif msg["role"] == prev["role"]:
+            # Merge consecutive same-role messages
+            prev["content"] = (prev.get("content", "") or "") + "\n" + (msg.get("content", "") or "")
+        else:
+            cleaned.append(msg)
+    return cleaned
 
 
 class AIAgent:
@@ -52,6 +81,8 @@ class AIAgent:
             max_tokens=config.max_tokens,
             threshold=config.compression_threshold,
         )
+        # Interrupt flag for graceful shutdown (set by CLI on Ctrl+C)
+        self._interrupt_requested = False
 
     # ------------------------------------------------------------------
     # public API
@@ -88,8 +119,14 @@ class AIAgent:
 
         # Agentic loop: LLM ↔ tools
         for turn in range(self.config.max_turns):
+            # Check for interrupt
+            if self._interrupt_requested:
+                break
             # Compress if context is getting too large
             messages = self.compressor.maybe_compress(messages)
+
+            # Validate message role alternation before sending to LLM
+            messages = _validate_message_roles(messages)
 
             logger.debug("LLM turn %d/%d, %d messages", turn + 1, self.config.max_turns, len(messages))
 
@@ -99,9 +136,17 @@ class AIAgent:
                 system=system_prompt,
             )
 
-            # Log token usage
+            # Log token usage and record cost
             if response.usage:
                 logger.info("Turn %d usage: %s", turn + 1, response.usage)
+                if isinstance(self.session, SessionStore) and self.session_id:
+                    cost = estimate_cost(self.config.model, response.usage)
+                    self.session.record_usage(
+                        self.session_id,
+                        input_tokens=response.usage.get("prompt_tokens", 0),
+                        output_tokens=response.usage.get("completion_tokens", 0),
+                        cost=cost,
+                    )
 
             # If there are tool calls, execute them and loop
             if response.tool_calls:
@@ -124,7 +169,7 @@ class AIAgent:
 
                 for tc in response.tool_calls:
                     logger.info("Tool call: %s(%s)", tc.name, tc.arguments)
-                    result = self.tools.dispatch(tc.name, tc.arguments)
+                    result = self._dispatch_tool_with_timeout(tc.name, tc.arguments)
                     tool_msg = {
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -156,6 +201,27 @@ class AIAgent:
     # ------------------------------------------------------------------
     # internals
     # ------------------------------------------------------------------
+
+    def _dispatch_tool_with_timeout(
+        self, name: str, args: dict[str, Any], timeout: int = DEFAULT_TOOL_TIMEOUT
+    ) -> str:
+        """Dispatch a tool call with timeout protection.
+
+        Runs the tool in a thread pool with the given timeout. If the tool
+        doesn't finish in time, returns a timeout error JSON.
+        """
+        import json
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(self.tools.dispatch, name, args)
+                return future.result(timeout=timeout)
+        except FutureTimeout:
+            logger.warning("Tool %s timed out after %ds", name, timeout)
+            return json.dumps({
+                "success": False,
+                "error": f"Tool '{name}' timed out after {timeout}s. "
+                         "The operation may still be running on the server.",
+            }, ensure_ascii=False)
 
     def _build_system_prompt(self) -> str:
         """Build the system prompt including memory context and dynamic tool list."""
