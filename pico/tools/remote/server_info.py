@@ -126,6 +126,9 @@ def server_status_handler(args: dict[str, Any]) -> str:
             result["uptime"] = load_res["stdout"].strip()
 
         return json.dumps(result, ensure_ascii=False)
+    except (ConnectionError, OSError) as e:
+        logger.warning("server_status SSH connection failed: %s", e)
+        return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
         logger.exception("server_status failed")
         return json.dumps({"success": False, "error": str(e)})

@@ -152,10 +152,12 @@ class TestPipedStdin:
         with patch("pico.agent.AIAgent") as mock_agent_cls:
             with patch("pico.config.load_config") as mock_cfg:
                 with patch("pico.session.SessionStore") as mock_ss:
-                    with patch("pico.memory.Memory"):
+                    with patch("pico.memory.Memory") as mock_memory:
                         with patch("pico.tools.registry.ToolRegistry"):
                             with patch("pico.tools.discover_and_register"):
-                                mock_cfg.return_value = MagicMock()
+                                mock_config = MagicMock()
+                                mock_config.work_dir = ""
+                                mock_cfg.return_value = mock_config
                                 mock_agent = MagicMock()
                                 mock_agent.run.return_value = "test response"
                                 mock_agent_cls.return_value = mock_agent
@@ -172,10 +174,12 @@ class TestPipedStdin:
         with patch("pico.agent.AIAgent") as mock_agent_cls:
             with patch("pico.config.load_config") as mock_cfg:
                 with patch("pico.session.SessionStore") as mock_ss:
-                    with patch("pico.memory.Memory"):
+                    with patch("pico.memory.Memory") as mock_memory:
                         with patch("pico.tools.registry.ToolRegistry"):
                             with patch("pico.tools.discover_and_register"):
-                                mock_cfg.return_value = MagicMock()
+                                mock_config = MagicMock()
+                                mock_config.work_dir = ""
+                                mock_cfg.return_value = mock_config
                                 mock_ss_instance = MagicMock()
                                 mock_ss.return_value = mock_ss_instance
                                 mock_agent = MagicMock()

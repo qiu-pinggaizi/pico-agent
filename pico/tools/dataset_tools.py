@@ -23,7 +23,16 @@ def _get_download_dir() -> Path:
     cfg = get_config()
     base = Path(cfg.base_dir) if cfg.base_dir else Path.home() / ".pico-agent"
     dl_dir = base / "datasets"
-    dl_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        dl_dir.mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError):
+        # Fallback: use work_dir or current working directory
+        work_dir = cfg.work_dir
+        if work_dir:
+            dl_dir = Path(work_dir) / ".pico-agent" / "datasets"
+        else:
+            dl_dir = Path.cwd() / ".pico-agent" / "datasets"
+        dl_dir.mkdir(parents=True, exist_ok=True)
     return dl_dir
 
 
@@ -210,9 +219,23 @@ def _download_huggingface(dataset_id: str, output_path: Path, subset: str, split
         return _error("huggingface_hub not installed. Run: pip install huggingface_hub")
 
     try:
+        # Progress callback for logging download status
+        def _progress_callback(event: str, data: dict) -> None:
+            if event == "download":
+                total = data.get("total", 0)
+                completed = data.get("completed", 0)
+                if total > 0:
+                    pct = completed / total * 100
+                    if int(pct) % 20 == 0:  # Log every 20%
+                        logger.info("HuggingFace download progress: %.0f%% (%d/%d bytes)", pct, completed, total)
+
         if split:
             # Download specific split
-            kwargs = {"repo_id": dataset_id, "repo_type": "dataset", "local_dir": str(output_path)}
+            kwargs = {
+                "repo_id": dataset_id,
+                "repo_type": "dataset",
+                "local_dir": str(output_path),
+            }
             if subset:
                 kwargs["filename"] = f"data/{subset}/{split}.parquet" if not split.endswith(".parquet") else f"data/{subset}/{split}"
             else:

@@ -60,25 +60,124 @@ def _load_image_base64(image: str) -> tuple[str, str]:
     return image, "image/png"
 
 
+def _vision_analyze_openai(
+    b64_data: str,
+    media_type: str,
+    prompt: str,
+    vision_model: str,
+    cfg: Any,
+) -> str:
+    """Vision analysis using OpenAI-compatible API."""
+    from openai import OpenAI
+
+    api_key = cfg.api_key or os.environ.get("PICO_API_KEY", "")
+    base_url = cfg.base_url or os.environ.get("PICO_BASE_URL", "https://api.openai.com/v1")
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+
+    response = client.chat.completions.create(
+        model=vision_model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{media_type};base64,{b64_data}",
+                            "detail": "high",
+                        },
+                    },
+                ],
+            }
+        ],
+        max_tokens=2048,
+    )
+
+    description = response.choices[0].message.content or ""
+
+    usage = {}
+    if response.usage:
+        usage = {
+            "prompt_tokens": response.usage.prompt_tokens,
+            "completion_tokens": response.usage.completion_tokens,
+            "total_tokens": response.usage.total_tokens,
+        }
+
+    logger.info("vision_analyze (openai): %d chars description", len(description))
+
+    return _success({
+        "description": description,
+        "model_used": vision_model,
+        "usage": usage,
+    })
+
+
+def _vision_analyze_anthropic(
+    b64_data: str,
+    media_type: str,
+    prompt: str,
+    vision_model: str,
+    cfg: Any,
+) -> str:
+    """Vision analysis using Anthropic native API."""
+    import anthropic
+
+    api_key = cfg.api_key or os.environ.get("PICO_API_KEY", "")
+    base_url = cfg.base_url or None
+
+    client = anthropic.Anthropic(api_key=api_key, base_url=base_url if base_url else None)
+
+    response = client.messages.create(
+        model=vision_model,
+        max_tokens=2048,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": b64_data,
+                        },
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
+    )
+
+    description = ""
+    for block in response.content:
+        if block.type == "text":
+            description += block.text
+
+    usage = {}
+    if response.usage:
+        usage = {
+            "prompt_tokens": response.usage.input_tokens,
+            "completion_tokens": response.usage.output_tokens,
+            "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+        }
+
+    logger.info("vision_analyze (anthropic): %d chars description", len(description))
+
+    return _success({
+        "description": description,
+        "model_used": vision_model,
+        "usage": usage,
+    })
+
+
 def vision_analyze(
     image: str,
     prompt: str = "Describe this image in detail.",
     model: str | None = None,
 ) -> str:
-    """Analyze an image using a multimodal LLM.
-
-    Sends the image (as base64) with a text prompt to the configured
-    vision-capable model and returns the description.
-
-    Args:
-        image: Path to an image file or base64-encoded image data.
-        prompt: Text prompt for what to analyze (default: "Describe this image in detail.").
-        model: Optional model override (e.g. "gpt-4o"). If not provided,
-               uses the configured model.
-
-    Returns:
-        JSON with keys: success, description, model_used.
-    """
+    """Analyze an image using a multimodal LLM."""
     try:
         b64_data, media_type = _load_image_base64(image)
     except Exception as e:
@@ -95,55 +194,19 @@ def vision_analyze(
             vision_model = "gpt-4o-mini"
 
     try:
-        from openai import OpenAI
         from pico.config import get_config
 
         cfg = get_config()
-        api_key = cfg.api_key or os.environ.get("PICO_API_KEY", "")
-        base_url = cfg.base_url or os.environ.get("PICO_BASE_URL", "https://api.openai.com/v1")
+        provider = cfg.provider.lower()
 
-        client = OpenAI(api_key=api_key, base_url=base_url)
+        if provider == "anthropic":
+            return _vision_analyze_anthropic(b64_data, media_type, prompt, vision_model, cfg)
+        else:
+            return _vision_analyze_openai(b64_data, media_type, prompt, vision_model, cfg)
 
-        response = client.chat.completions.create(
-            model=vision_model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{media_type};base64,{b64_data}",
-                                "detail": "high",
-                            },
-                        },
-                    ],
-                }
-            ],
-            max_tokens=2048,
-        )
-
-        description = response.choices[0].message.content or ""
-
-        usage = {}
-        if response.usage:
-            usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-            }
-
-        logger.info("vision_analyze: %d chars description", len(description))
-
-        return _success({
-            "description": description,
-            "model_used": vision_model,
-            "usage": usage,
-        })
-
-    except ImportError:
-        return _error("openai package not installed — cannot run vision analysis")
+    except ImportError as e:
+        pkg = "anthropic" if "anthropic" in str(e) else "openai"
+        return _error(f"{pkg} package not installed — cannot run vision analysis: {e}")
     except Exception as e:
         logger.error("vision_analyze failed: %s", e)
         return _error(f"Vision analysis failed: {e}")

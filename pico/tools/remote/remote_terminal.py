@@ -89,6 +89,9 @@ def remote_terminal_handler(
         })
     except PermissionError as e:
         return json.dumps({"success": False, "error": str(e)})
+    except ConnectionError as e:
+        logger.warning("remote_terminal SSH connection failed: %s", e)
+        return json.dumps({"success": False, "error": str(e)})
     except Exception as e:
         logger.exception("remote_terminal failed")
         return json.dumps({"success": False, "error": str(e)})

@@ -25,12 +25,22 @@ logger = logging.getLogger(__name__)
 
 _ssh_clients: dict[str, "SSHClient"] = {}
 
+# Cache of recent SSH connection failures to avoid repeated retries.
+# Maps server_name -> (error_message, timestamp)
+_ssh_failure_cache: dict[str, tuple[str, float]] = {}
+# How long to remember a connection failure (seconds)
+_FAILURE_CACHE_TTL = 60
+
 
 def get_ssh_client(server_name: str) -> "SSHClient":
     """Return (or create) a pooled SSHClient for *server_name*."""
+    import time as _time
+
     if server_name in _ssh_clients:
         client = _ssh_clients[server_name]
         if client.is_connected():
+            # Connection recovered — clear any cached failure
+            _ssh_failure_cache.pop(server_name, None)
             return client
         # stale — drop and recreate
         _ssh_clients.pop(server_name, None)
@@ -51,6 +61,19 @@ def get_ssh_client(server_name: str) -> "SSHClient":
         )
 
     srv_cfg = servers[server_name]
+    host = srv_cfg["host"]
+
+    # Check if we recently failed to connect to this host
+    if host in _ssh_failure_cache:
+        err_msg, fail_time = _ssh_failure_cache[host]
+        if _time.monotonic() - fail_time < _FAILURE_CACHE_TTL:
+            raise ConnectionError(
+                f"SSH connection to '{server_name}' ({host}) recently failed: {err_msg}. "
+                f"Check your credentials. Will retry after {_FAILURE_CACHE_TTL}s."
+            )
+        else:
+            _ssh_failure_cache.pop(host, None)
+
     client = SSHClient(
         host=srv_cfg["host"],
         port=srv_cfg.get("port", 22),
@@ -111,8 +134,17 @@ class SSHClient:
         if self.password:
             kwargs["password"] = self.password
 
-        self._client.connect(**kwargs)
-        logger.info("SSH connected to %s", self.host)
+        try:
+            self._client.connect(**kwargs)
+            logger.info("SSH connected to %s", self.host)
+        except Exception as e:
+            # Clean up partial client state
+            self._close()
+            # Cache the failure to prevent repeated retries
+            _ssh_failure_cache[self.host] = (str(e), time.monotonic())
+            raise ConnectionError(
+                f"SSH connection to {self.user}@{self.host}:{self.port} failed: {e}"
+            ) from e
 
     def is_connected(self) -> bool:
         if self._client is None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -67,6 +68,48 @@ class LLMProvider(ABC):
         """
 
 
+def _is_retryable_error(exc: Exception) -> bool:
+    """Return True if the error is transient and worth retrying."""
+    exc_str = str(exc).lower()
+    # Rate limit (429)
+    if "429" in exc_str or "rate limit" in exc_str or "too many requests" in exc_str:
+        return True
+    # Server errors (5xx)
+    if "500" in exc_str or "502" in exc_str or "503" in exc_str or "504" in exc_str:
+        return True
+    # Timeout / connection errors
+    if "timeout" in exc_str or "timed out" in exc_str or "connection" in exc_str:
+        return True
+    # Overloaded
+    if "overloaded" in exc_str or "capacity" in exc_str:
+        return True
+    return False
+
+
+def _call_with_retry(fn, *, max_retries: int = 3, base_delay: float = 1.0):
+    """Call *fn()* with exponential backoff on transient errors.
+
+    Non-retryable errors (auth, bad request) are raised immediately.
+    """
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except Exception as e:
+            last_exc = e
+            if not _is_retryable_error(e):
+                raise
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                logger.warning(
+                    "API call failed (attempt %d/%d): %s — retrying in %.1fs",
+                    attempt + 1, max_retries, e, delay,
+                )
+                time.sleep(delay)
+    # All retries exhausted
+    raise last_exc  # type: ignore[misc]
+
+
 class OpenAIProvider(LLMProvider):
     """OpenAI-compatible LLM provider.
 
@@ -108,7 +151,7 @@ class OpenAIProvider(LLMProvider):
         logger.debug("OpenAI chat request: model=%s, messages=%d, tools=%d",
                       self.model, len(api_messages), len(tools or []))
 
-        response = client.chat.completions.create(**kwargs)
+        response = _call_with_retry(lambda: client.chat.completions.create(**kwargs))
         choice = response.choices[0]
 
         # Parse tool calls
@@ -289,7 +332,7 @@ class AnthropicProvider(LLMProvider):
         logger.debug("Anthropic chat request: model=%s, messages=%d, tools=%d",
                       self.model, len(converted_messages), len(tools or []))
 
-        response = client.messages.create(**kwargs)
+        response = _call_with_retry(lambda: client.messages.create(**kwargs))
 
         content_text = ""
         tool_calls: list[ToolCall] = []
