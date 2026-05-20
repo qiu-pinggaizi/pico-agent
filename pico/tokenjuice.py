@@ -189,13 +189,30 @@ def _load_user_rules() -> list[dict[str, Any]]:
 
 
 def _find_matching_rule(tool_name: str, rules: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Find the first rule whose match patterns include the tool name."""
-    for rule in reversed(rules):  # later rules override earlier
+    """Find the best rule matching the tool name.
+
+    Specific patterns (no wildcards) are preferred over wildcard patterns.
+    Among rules of equal specificity, later rules override earlier ones.
+    """
+    best: dict[str, Any] | None = None
+    best_specific = False
+
+    for rule in rules:
         patterns = rule.get("match", [])
+        matched = False
+        is_specific = False
         for pattern in patterns:
             if fnmatch(tool_name, pattern):
-                return rule
-    return None
+                matched = True
+                if pattern != "*":
+                    is_specific = True
+                break
+        if matched:
+            # Prefer specific over wildcard; among same specificity, later wins
+            if is_specific or not best_specific:
+                best = rule
+                best_specific = is_specific
+    return best
 
 
 # ---------------------------------------------------------------------------

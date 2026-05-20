@@ -118,6 +118,8 @@ def _rich_print_memory(memory_content: str) -> None:
 
 def _handle_slash_command(cmd: str, agent: AIAgent) -> str | None:
     """Handle a slash command. Returns a display string, or None if not recognized."""
+    from pico.session import SessionStore  # runtime import for isinstance checks
+
     parts = cmd.strip().split(maxsplit=1)
     command = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""

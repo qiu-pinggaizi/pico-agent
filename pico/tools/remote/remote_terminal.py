@@ -59,6 +59,10 @@ def remote_terminal_handler(
     if not command:
         return json.dumps({"success": False, "error": "command is required"})
 
+    # Ensure command is a string (LLM may pass dict/list by mistake)
+    if not isinstance(command, str):
+        command = str(command)
+
     try:
         client = get_ssh_client(server)
         workspace = client.workspace

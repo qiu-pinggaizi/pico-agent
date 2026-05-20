@@ -185,8 +185,17 @@ if fmt == "yolo":
     for candidate in ["labels", "train/labels", "val/labels"]:
         p = data_path / candidate
         if p.is_dir():
-            labels_dir = str(p)
-            break
+            # Check direct .txt files first
+            if list(p.glob("*.txt")):
+                labels_dir = str(p)
+                break
+            # Check nested (e.g. labels/train2017/)
+            for sub in sorted(p.iterdir()):
+                if sub.is_dir() and list(sub.glob("*.txt")):
+                    labels_dir = str(sub)
+                    break
+            if labels_dir:
+                break
     if labels_dir:
         counter = collections.Counter()
         for txt in Path(labels_dir).glob("*.txt"):
@@ -238,13 +247,22 @@ print(json.dumps(result))
             result["classes"] = _read_classes_file(classes_file)
 
         if fmt == "yolo":
-            # Find labels dir
+            # Find labels dir — also handles nested structures like labels/train2017/
             labels_dir = None
             for candidate in ["labels", "train/labels", "val/labels"]:
                 p = data_path / candidate
                 if p.is_dir():
-                    labels_dir = str(p)
-                    break
+                    # Check if there are .txt files directly
+                    if list(p.glob("*.txt")):
+                        labels_dir = str(p)
+                        break
+                    # Check for nested subdirs (e.g. labels/train2017/)
+                    for sub in sorted(p.iterdir()):
+                        if sub.is_dir() and list(sub.glob("*.txt")):
+                            labels_dir = str(sub)
+                            break
+                    if labels_dir:
+                        break
             if labels_dir:
                 counter = _count_classes_yolo(labels_dir)
                 result["class_distribution"] = dict(counter)
